@@ -17,6 +17,9 @@ enum GameState {
   PAUSED, // Game paused
 }
 
+// Add debug flag
+const DEBUG_COLLISION_BOUNDARIES = false; // Set to true to enable collision boundary visualization
+
 export class PlayState implements IGameState {
   public gameStateManager: GameStateManager;
   scene: THREE.Scene;
@@ -28,6 +31,9 @@ export class PlayState implements IGameState {
     minZ: number;
     maxZ: number;
   };
+
+  // Expose debug collision boundaries property that can be accessed by other classes
+  public debugCollisionBoundaries: boolean = DEBUG_COLLISION_BOUNDARIES;
 
   private camera: THREE.PerspectiveCamera;
   private cameraControls: OrbitControls | null = null;
@@ -127,9 +133,6 @@ export class PlayState implements IGameState {
     // Create surface mesh
     this.createSurfaceMesh();
 
-    // Create orientation guide
-    this.createOrientationGuide(this.scene);
-
     // Create walls
     this.createWalls();
 
@@ -226,6 +229,11 @@ export class PlayState implements IGameState {
       if (event.key === 'f' || event.key === 'F') {
         this.isWireframeMode = !this.isWireframeMode;
         this.toggleWireframeMode(this.scene, this.isWireframeMode);
+      }
+      // Collision boundary visualization toggle
+      else if (event.key === 'c' || event.key === 'C') {
+        this.debugCollisionBoundaries = !this.debugCollisionBoundaries;
+        this.toggleCollisionBoundaries();
       }
       // Game controls
       else if (event.key === ' ') {
@@ -459,6 +467,7 @@ export class PlayState implements IGameState {
   private startGame(): void {
     // Hide message
     this.hideMessage();
+    this.alienManager.reset();
 
     // Set game state to playing
     this.state = GameState.PLAYING;
@@ -821,6 +830,135 @@ export class PlayState implements IGameState {
     });
   }
 
+  // Toggle collision boundary visualization
+  private toggleCollisionBoundaries(): void {
+    // Create a notification about collision boundaries mode
+    const notification = document.createElement('div');
+    notification.style.position = 'absolute';
+    notification.style.top = '170px';
+    notification.style.left = '10px';
+    notification.style.color = '#ff00ff';
+    notification.style.fontFamily = 'monospace';
+    notification.style.fontSize = '16px';
+    notification.style.padding = '5px';
+    notification.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+    notification.style.border = '1px solid #ff00ff';
+    notification.style.transition = 'opacity 0.5s ease-in-out';
+    notification.style.opacity = '1';
+    notification.textContent = this.debugCollisionBoundaries
+      ? 'COLLISION BOUNDARIES: ON'
+      : 'COLLISION BOUNDARIES: OFF';
+
+    document.body.appendChild(notification);
+
+    // Fade out after 2 seconds
+    setTimeout(() => {
+      notification.style.opacity = '0';
+      // Remove from DOM after fade out
+      setTimeout(() => {
+        document.body.removeChild(notification);
+      }, 500);
+    }, 2000);
+
+    // Create or remove collision helpers based on the new state
+    if (this.debugCollisionBoundaries) {
+      this.createCollisionHelpers();
+    } else {
+      this.removeCollisionHelpers();
+    }
+  }
+
+  // Create collision helpers for all game objects
+  private createCollisionHelpers(): void {
+    // Create helpers for balls
+    for (const ball of this.balls) {
+      if (!ball.collisionHelper) {
+        const helperGeometry = new THREE.SphereGeometry(ball.size.radius, 16, 8);
+        const helperMaterial = new THREE.MeshBasicMaterial({
+          color: 0xff0000,
+          wireframe: true,
+        });
+
+        ball.collisionHelper = new THREE.Mesh(helperGeometry, helperMaterial);
+        ball.collisionHelper.position.copy(ball.position);
+        this.scene.add(ball.collisionHelper);
+      }
+    }
+
+    // Create helpers for aliens
+    this.alienManager.aliens.forEach((alien) => {
+      if (!alien.collisionHelper && !alien.isDestroyed) {
+        const helperGeometry = new THREE.SphereGeometry(alien.size.width / 2, 16, 8);
+        const helperMaterial = new THREE.MeshBasicMaterial({
+          color: 0x00ff00,
+          wireframe: true,
+        });
+
+        alien.collisionHelper = new THREE.Mesh(helperGeometry, helperMaterial);
+        alien.collisionHelper.position.copy(alien.mesh.position);
+        this.scene.add(alien.collisionHelper);
+      }
+    });
+
+    // Create helpers for paddles
+    for (const paddle of this.paddles) {
+      if (!paddle.collisionHelper) {
+        const helperGeometry = new THREE.BoxGeometry(
+          paddle.size.width,
+          paddle.size.height,
+          paddle.size.depth
+        );
+        const helperMaterial = new THREE.MeshBasicMaterial({
+          color: 0x0000ff,
+          wireframe: true,
+        });
+
+        paddle.collisionHelper = new THREE.Mesh(helperGeometry, helperMaterial);
+        paddle.collisionHelper.position.copy(paddle.position);
+        this.scene.add(paddle.collisionHelper);
+      }
+    }
+  }
+
+  // Remove all collision helpers
+  private removeCollisionHelpers(): void {
+    // Remove ball helpers
+    for (const ball of this.balls) {
+      if (ball.collisionHelper) {
+        this.scene.remove(ball.collisionHelper);
+        if (ball.collisionHelper.geometry) ball.collisionHelper.geometry.dispose();
+        if (ball.collisionHelper.material instanceof THREE.Material) {
+          ball.collisionHelper.material.dispose();
+        }
+        ball.collisionHelper = null;
+      }
+    }
+
+    // Remove alien helpers
+    this.alienManager.aliens.forEach((alien) => {
+      if (alien.collisionHelper) {
+        this.scene.remove(alien.collisionHelper);
+        if (alien.collisionHelper.geometry) alien.collisionHelper.geometry.dispose();
+        if (alien.collisionHelper.material instanceof THREE.Material) {
+          alien.collisionHelper.material.dispose();
+        }
+        alien.collisionHelper = null;
+      }
+    });
+
+    // Remove paddle helpers
+    for (const paddle of this.paddles) {
+      if (paddle.collisionHelper) {
+        this.scene.remove(paddle.collisionHelper);
+        if (paddle.collisionHelper.geometry) paddle.collisionHelper.geometry.dispose();
+        if (paddle.collisionHelper.material instanceof THREE.Material) {
+          paddle.collisionHelper.material.dispose();
+        }
+        paddle.collisionHelper = null;
+      }
+    }
+  }
+
   render(renderer: THREE.WebGLRenderer): void {
     renderer.render(this.scene, this.camera);
 
@@ -1034,60 +1172,5 @@ export class PlayState implements IGameState {
     if (instructionsElement) {
       instructionsElement.remove();
     }
-  }
-
-  // Creates a small orientation guide that stays in the corner of the screen
-  createOrientationGuide(scene: THREE.Scene): void {
-    // Create a separate scene for the orientation guide
-    const guideScene = new THREE.Scene();
-
-    // Add axes to the guide
-    const axesHelper = new THREE.AxesHelper(10);
-    guideScene.add(axesHelper);
-
-    // Add labels
-    const createGuideLabel = (text: string, position: THREE.Vector3, color: string) => {
-      const canvas = document.createElement('canvas');
-      canvas.width = 64;
-      canvas.height = 32;
-
-      const context = canvas.getContext('2d');
-      if (context) {
-        context.fillStyle = 'rgba(0, 0, 0, 0.5)';
-        context.fillRect(0, 0, canvas.width, canvas.height);
-
-        context.font = 'bold 20px Arial';
-        context.fillStyle = color;
-        context.textAlign = 'center';
-        context.textBaseline = 'middle';
-        context.fillText(text, canvas.width / 2, canvas.height / 2);
-      }
-
-      const texture = new THREE.CanvasTexture(canvas);
-      const material = new THREE.SpriteMaterial({ map: texture });
-      const sprite = new THREE.Sprite(material);
-
-      sprite.position.copy(position);
-      sprite.scale.set(2, 1, 1);
-
-      guideScene.add(sprite);
-      return sprite;
-    };
-
-    // Add axis labels for the guide
-    createGuideLabel('X', new THREE.Vector3(12, 0, 0), '#ff0000');
-    createGuideLabel('Y', new THREE.Vector3(0, 12, 0), '#00ff00');
-    createGuideLabel('Z', new THREE.Vector3(0, 0, 12), '#0000ff');
-
-    // Create camera for the guide
-    const guideCamera = new THREE.PerspectiveCamera(50, 1, 1, 1000);
-    guideCamera.position.set(15, 15, 15);
-    guideCamera.lookAt(0, 0, 0);
-
-    // Add the guide elements to the main scene
-    scene.userData.orientationGuide = {
-      scene: guideScene,
-      camera: guideCamera,
-    };
   }
 }

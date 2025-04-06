@@ -10,6 +10,9 @@ export class Paddle implements GameObject {
   public velocity: THREE.Vector3;
   public size: { width: number; height: number; depth: number };
 
+  // Add collision helper for debug visualization
+  public collisionHelper: THREE.Mesh | null = null;
+
   private speed: number = 15; // Movement speed
   private boundaries: { min: number; max: number };
   private targetPosition: number = 0;

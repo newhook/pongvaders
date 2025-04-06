@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import { GameObject } from './types';
 import { PlayState } from './playState';
 
+// Import the debug flag
+const DEBUG_COLLISION_BOUNDARIES = false; // This will be overridden by the value in playState.ts
+
 export class Ball implements GameObject {
   private game: PlayState;
   public mesh: THREE.Mesh;
@@ -11,6 +14,9 @@ export class Ball implements GameObject {
 
   // Flag to track if the ball is attached to the paddle
   public isAttachedToPaddle: boolean = true;
+
+  // Add collision debug helper
+  public collisionHelper: THREE.Mesh | null = null;
 
   private radius: number;
   private initialVelocity: { x: number; y: number; z: number };
@@ -80,6 +86,25 @@ export class Ball implements GameObject {
 
     const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
     this.mesh.add(glowMesh);
+
+    // Add debug collision helper if debug mode is enabled
+    if (DEBUG_COLLISION_BOUNDARIES) {
+      this.createCollisionHelper();
+    }
+  }
+
+  // Create a wireframe sphere to visualize the collision boundary
+  private createCollisionHelper(): void {
+    if (!this.scene) return;
+
+    const helperGeometry = new THREE.SphereGeometry(this.radius, 16, 8);
+    const helperMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff0000,
+      wireframe: true,
+    });
+
+    this.collisionHelper = new THREE.Mesh(helperGeometry, helperMaterial);
+    this.scene.add(this.collisionHelper);
   }
 
   update(deltaTime: number): void {
@@ -90,6 +115,11 @@ export class Ball implements GameObject {
 
     // Update mesh position
     this.mesh.position.copy(this.position);
+
+    // Update collision helper position
+    if (this.collisionHelper) {
+      this.collisionHelper.position.copy(this.position);
+    }
 
     // Create trail effect
     this.updateTrail(deltaTime);

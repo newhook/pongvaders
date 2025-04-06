@@ -65,15 +65,15 @@ export class PreMarquee implements IGameState {
     const soundManager = this.gameStateManager.initSoundManager();
     await soundManager.startAudioContext();
     await soundManager.loadMarqueeMusic();
-    this.startMarquee();
+    this.startPlay();
   }
 
-  private startMarquee() {
+  private startPlay() {
     const welcomeElement = document.getElementById('welcome');
     if (welcomeElement) {
       welcomeElement.remove();
     }
-    this.gameStateManager.switchToMarquee();
+    this.gameStateManager.switchToPlay();
   }
 
   update(deltaTime: number): void {

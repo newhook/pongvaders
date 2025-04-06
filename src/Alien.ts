@@ -12,6 +12,9 @@ export class Alien implements GameObject {
   public isDestroyed: boolean = false;
   public points: number; // Points awarded when destroyed
 
+  // Add collision helper
+  public collisionHelper: THREE.Mesh | null = null;
+
   private animationMixer: THREE.AnimationMixer | null = null;
   private animations: THREE.AnimationAction[] = [];
   private hoverAmplitude: number = 0.2; // How much to hover up and down
@@ -89,6 +92,12 @@ export class Alien implements GameObject {
 
     // Add eyes/details based on alien type
     this.addAlienDetails(type);
+
+    // Add debug collision helper if enabled
+    // Import DEBUG_COLLISION_BOUNDARIES from playState
+    if ((game as any).debugCollisionBoundaries === true) {
+      this.createCollisionHelper();
+    }
   }
 
   // SimplePhysicsBody methods merged directly into Alien
@@ -298,6 +307,11 @@ export class Alien implements GameObject {
 
     // Update mesh position
     this.mesh.position.set(position.x, this.initialY + hoverY, position.z);
+
+    // Update collision helper position
+    if (this.collisionHelper) {
+      this.collisionHelper.position.copy(this.mesh.position);
+    }
   }
 
   // Move the alien down by a specific amount
@@ -317,6 +331,16 @@ export class Alien implements GameObject {
   destroy(): void {
     if (this.isDestroyed) return;
     this.isDestroyed = true;
+
+    // Remove collision helper immediately if it exists
+    if (this.collisionHelper && this.collisionHelper.parent) {
+      this.collisionHelper.parent.remove(this.collisionHelper);
+      if (this.collisionHelper.geometry) this.collisionHelper.geometry.dispose();
+      if (this.collisionHelper.material instanceof THREE.Material) {
+        this.collisionHelper.material.dispose();
+      }
+      this.collisionHelper = null;
+    }
 
     // Make the alien blink before disappearing
     if (this.mesh.material instanceof THREE.MeshStandardMaterial) {
@@ -465,6 +489,20 @@ export class Alien implements GameObject {
   }
 
   dispose(): void {
+    // Clean up collision helper if it exists
+    if (this.collisionHelper) {
+      if (this.collisionHelper.parent) {
+        this.collisionHelper.parent.remove(this.collisionHelper);
+      }
+      if (this.collisionHelper.geometry) {
+        this.collisionHelper.geometry.dispose();
+      }
+      if (this.collisionHelper.material instanceof THREE.Material) {
+        this.collisionHelper.material.dispose();
+      }
+      this.collisionHelper = null;
+    }
+    
     // Clean up resources
     if (this.mesh.parent) {
       this.mesh.parent.remove(this.mesh);
@@ -479,5 +517,22 @@ export class Alien implements GameObject {
     } else if (Array.isArray(this.mesh.material)) {
       this.mesh.material.forEach((material) => material.dispose());
     }
+  }
+
+  // Create a wireframe box to visualize the collision boundary
+  private createCollisionHelper(): void {
+    const scene = this.mesh.parent;
+    if (!scene) return;
+
+    // Create a spherical helper that represents the alien's collision boundary
+    const helperGeometry = new THREE.SphereGeometry(this.size.width / 2, 16, 8);
+    const helperMaterial = new THREE.MeshBasicMaterial({
+      color: 0x00ff00,
+      wireframe: true,
+    });
+
+    this.collisionHelper = new THREE.Mesh(helperGeometry, helperMaterial);
+    this.collisionHelper.position.copy(this.mesh.position);
+    scene.add(this.collisionHelper);
   }
 }

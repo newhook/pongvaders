@@ -1,23 +1,15 @@
 import * as THREE from 'three';
 import { Alien } from './Alien';
-import { GameObject } from './types';
 import { PlayState } from './playState';
 import { Ball } from './Ball';
 
 // Direction of alien swarm movement
 type SwarmDirection = 'left' | 'right';
 
-export class AlienManager implements GameObject {
+export class AlienManager {
   private game: PlayState;
   private aliens: Alien[] = [];
   private scene: THREE.Scene;
-  public position: THREE.Vector3;
-  public velocity: THREE.Vector3;
-  public isStatic: boolean = true;
-  public isBall: boolean = false;
-  public isPaddle: boolean = false;
-  public size: { width: number; height: number; depth: number } = { width: 0, height: 0, depth: 0 };
-  public mesh: THREE.Mesh; // Required by GameObject interface
 
   private rows: number = 5;
   private columns: number = 9;
@@ -53,16 +45,6 @@ export class AlienManager implements GameObject {
       max: worldSize / 2 - 1.5,
     };
     this.bottomBoundary = bottomBoundary;
-
-    // Initialize position and velocity vectors required by GameObject interface
-    this.position = new THREE.Vector3(0, 0, 0);
-    this.velocity = new THREE.Vector3(0, 0, 0);
-
-    // Create an empty mesh for the interface
-    const geometry = new THREE.BufferGeometry();
-    const material = new THREE.MeshBasicMaterial();
-    this.mesh = new THREE.Mesh(geometry, material);
-    this.mesh.visible = false;
 
     // Create initial alien formation
     this.createAlienFormation();
