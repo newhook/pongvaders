@@ -50,6 +50,18 @@ export class AlienManager {
     this.createAlienFormation();
   }
 
+  public createCollisionHelpers(): void {
+    this.aliens.forEach((alien) => {
+      alien.createCollisionHelper();
+    });
+  }
+
+  public removeCollisionHelpers(): void {
+    this.aliens.forEach((alien) => {
+      alien.removeCollisionHelper();
+    });
+  }
+
   // Create a formation of aliens in rows and columns
   private createAlienFormation(): void {
     // Start position for the grid (centered)

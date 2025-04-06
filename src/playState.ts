@@ -870,202 +870,55 @@ export class PlayState implements IGameState {
 
   // Create collision helpers for all game objects
   private createCollisionHelpers(): void {
-    // Create helpers for balls
     for (const ball of this.balls) {
-      if (!ball.collisionHelper) {
-        const helperGeometry = new THREE.SphereGeometry(ball.size.radius, 16, 8);
-        const helperMaterial = new THREE.MeshBasicMaterial({
-          color: 0xff0000,
-          wireframe: true,
-        });
-
-        ball.collisionHelper = new THREE.Mesh(helperGeometry, helperMaterial);
-        ball.collisionHelper.position.copy(ball.position);
-        this.scene.add(ball.collisionHelper);
-      }
+      ball.createCollisionHelper();
     }
 
-    // Create helpers for aliens
-    this.alienManager.aliens.forEach((alien) => {
-      if (!alien.collisionHelper && !alien.isDestroyed) {
-        const helperGeometry = new THREE.SphereGeometry(alien.size.width / 2, 16, 8);
-        const helperMaterial = new THREE.MeshBasicMaterial({
-          color: 0x00ff00,
-          wireframe: true,
-        });
+    this.alienManager.createCollisionHelpers();
 
-        alien.collisionHelper = new THREE.Mesh(helperGeometry, helperMaterial);
-        alien.collisionHelper.position.copy(alien.mesh.position);
-        this.scene.add(alien.collisionHelper);
-      }
-    });
-
-    // Create helpers for paddles
     for (const paddle of this.paddles) {
-      if (!paddle.collisionHelper) {
-        const helperGeometry = new THREE.BoxGeometry(
-          paddle.size.width,
-          paddle.size.height,
-          paddle.size.depth
-        );
-        const helperMaterial = new THREE.MeshBasicMaterial({
-          color: 0x0000ff,
-          wireframe: true,
-        });
-
-        paddle.collisionHelper = new THREE.Mesh(helperGeometry, helperMaterial);
-        paddle.collisionHelper.position.copy(paddle.position);
-        this.scene.add(paddle.collisionHelper);
-      }
+      paddle.createCollisionHelper();
     }
   }
 
   // Remove all collision helpers
   private removeCollisionHelpers(): void {
-    // Remove ball helpers
     for (const ball of this.balls) {
-      if (ball.collisionHelper) {
-        this.scene.remove(ball.collisionHelper);
-        if (ball.collisionHelper.geometry) ball.collisionHelper.geometry.dispose();
-        if (ball.collisionHelper.material instanceof THREE.Material) {
-          ball.collisionHelper.material.dispose();
-        }
-        ball.collisionHelper = null;
-      }
+      ball.removeCollisionHelper();
     }
 
-    // Remove alien helpers
-    this.alienManager.aliens.forEach((alien) => {
-      if (alien.collisionHelper) {
-        this.scene.remove(alien.collisionHelper);
-        if (alien.collisionHelper.geometry) alien.collisionHelper.geometry.dispose();
-        if (alien.collisionHelper.material instanceof THREE.Material) {
-          alien.collisionHelper.material.dispose();
-        }
-        alien.collisionHelper = null;
-      }
-    });
+    this.alienManager.removeCollisionHelpers();
 
-    // Remove paddle helpers
     for (const paddle of this.paddles) {
-      if (paddle.collisionHelper) {
-        this.scene.remove(paddle.collisionHelper);
-        if (paddle.collisionHelper.geometry) paddle.collisionHelper.geometry.dispose();
-        if (paddle.collisionHelper.material instanceof THREE.Material) {
-          paddle.collisionHelper.material.dispose();
-        }
-        paddle.collisionHelper = null;
-      }
+      paddle.removeCollisionHelper();
     }
   }
 
   render(renderer: THREE.WebGLRenderer): void {
     renderer.render(this.scene, this.camera);
-
-    // Render orientation guide if it exists
-    if (this.scene.userData.orientationGuide) {
-      const { scene: guideScene, camera: guideCamera } = this.scene.userData.orientationGuide;
-
-      // Update orientation guide to match main camera's rotation
-      const guideHelper = guideScene.children[0] as THREE.AxesHelper;
-      if (guideHelper) {
-        guideHelper.quaternion.copy(this.camera.quaternion);
-      }
-
-      // Set up the viewport for the guide in the bottom-right corner
-      const guideSize = Math.min(150, window.innerWidth / 5);
-      renderer.setViewport(
-        window.innerWidth - guideSize - 10,
-        window.innerHeight - guideSize - 10,
-        guideSize,
-        guideSize
-      );
-      renderer.setScissor(
-        window.innerWidth - guideSize - 10,
-        window.innerHeight - guideSize - 10,
-        guideSize,
-        guideSize
-      );
-      renderer.setScissorTest(true);
-
-      // Clear depth buffer to ensure guide renders on top
-      renderer.clearDepth();
-
-      // Render the guide
-      renderer.render(guideScene, guideCamera);
-
-      // Reset viewport and scissor test
-      renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
-      renderer.setScissor(0, 0, window.innerWidth, window.innerHeight);
-      renderer.setScissorTest(false);
-    }
   }
 
   update(deltaTime: number): void {
-    // Update physics simulation first
-    this.updatePhysics(deltaTime);
+    if (this.state !== GameState.PLAYING) {
+      // Update paddle and ball
+      this.alienManager.update(deltaTime);
 
-    // Update paddle and ball
+      // Update camera controls if they exist
+      if (this.cameraControls) {
+        this.cameraControls.update();
+      }
+
+      return;
+    }
+
     this.alienManager.update(deltaTime);
 
-    // Only process gameplay logic when in PLAYING state
-    if (this.state === GameState.PLAYING) {
-      // Check for collisions with aliens
-      for (const ball of this.balls) {
-        // Skip balls that are still attached to the paddle
-        if (ball.isAttachedToPaddle) continue;
-
-        const ballPosition = ball.mesh.position;
-        const points = this.alienManager.checkCollisions(ball);
-
-        // Add points if any were scored
-        if (points > 0) {
-          this.addScore(points);
-        }
-
-        // Check if level is complete
-        if (this.alienManager.areAllDestroyed()) {
-          this.levelComplete();
-        }
-
-        // Check if ball is below paddle (lost ball)
-        if (ballPosition.y < this.bottomBoundary - 3) {
-          this.ballLost(ball);
-        }
-      }
-    }
-
     // Update all other game objects
-    this.balls.forEach((ball) => ball.update(deltaTime));
     this.paddles.forEach((paddle) => paddle.update(deltaTime));
 
-    // Update camera controls if they exist
-    if (this.cameraControls) {
-      this.cameraControls.update();
-    }
-  }
-
-  // Physics update function integrated into PlayState
-  private updatePhysics(deltaTime: number): void {
-    // Update positions based on velocities
-    for (const body of [...this.balls, ...this.paddles]) {
-      // Skip physics update for balls that are attached to the paddle
-      if (body instanceof Ball && body.isAttachedToPaddle) {
-        continue;
-      }
-
-      // Update position based on velocity
-      body.position.x += body.velocity.x * deltaTime;
-      body.position.y += body.velocity.y * deltaTime;
-      body.position.z += body.velocity.z * deltaTime;
-
-      // Update mesh position from physics body
-      if (body.mesh) {
-        body.mesh.position.copy(body.position);
-      }
-    }
-
     for (const ball of this.balls) {
+      ball.update(deltaTime);
+
       // Skip collision detection for balls attached to the paddle
       if (ball.isAttachedToPaddle) continue;
 
@@ -1081,10 +934,24 @@ export class PlayState implements IGameState {
         if (collision) {
           // Resolve collision
           this.resolveBallBoxCollision(ball, paddle.position, paddle.size);
-
-          // Trigger collision callbacks if needed
-          ball.onCollision(paddle);
         }
+      }
+
+      const points = this.alienManager.checkCollisions(ball);
+
+      // Add points if any were scored
+      if (points > 0) {
+        this.addScore(points);
+      }
+
+      // Check if level is complete
+      if (this.alienManager.areAllDestroyed()) {
+        this.levelComplete();
+      }
+
+      // Check if ball is below paddle (lost ball)
+      if (ball.position.y < this.bottomBoundary - 3) {
+        this.ballLost(ball);
       }
 
       // Only handle ball bounds collision
@@ -1119,8 +986,10 @@ export class PlayState implements IGameState {
       }
     }
 
-    // 2. Ball with aliens is already handled in the alienManager.checkCollisions
-    // which is called in the update method
+    // Update camera controls if they exist
+    if (this.cameraControls) {
+      this.cameraControls.update();
+    }
   }
 
   onEnter(): void {

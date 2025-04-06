@@ -22,7 +22,7 @@ export class Ball implements GameObject {
   private initialVelocity: { x: number; y: number; z: number };
   private maxSpeed: number = 20;
   private trailParticles: THREE.Points[] = [];
-  private scene: THREE.Scene | null = null;
+  private scene: THREE.Scene;
   private trailLifetime: number = 0.5; // Trail lifetime in seconds
   private trailInterval: number = 0.05; // Time between trail particles
   private lastTrailTime: number = 0;
@@ -94,8 +94,11 @@ export class Ball implements GameObject {
   }
 
   // Create a wireframe sphere to visualize the collision boundary
-  private createCollisionHelper(): void {
+  public createCollisionHelper(): void {
     if (!this.scene) return;
+    if (this.collisionHelper) {
+      return;
+    }
 
     const helperGeometry = new THREE.SphereGeometry(this.radius, 16, 8);
     const helperMaterial = new THREE.MeshBasicMaterial({
@@ -107,13 +110,29 @@ export class Ball implements GameObject {
     this.scene.add(this.collisionHelper);
   }
 
+  public removeCollisionHelper(): void {
+    // Remove ball helpers
+    if (this.collisionHelper) {
+      this.scene.remove(this.collisionHelper);
+      if (this.collisionHelper.geometry) this.collisionHelper.geometry.dispose();
+      if (this.collisionHelper.material instanceof THREE.Material) {
+        this.collisionHelper.material.dispose();
+      }
+      this.collisionHelper = null;
+    }
+  }
+
   update(deltaTime: number): void {
     // If attached to paddle, don't update physics
     if (this.isAttachedToPaddle) {
       return;
     }
+    // Update position based on velocity
+    this.position.x += this.velocity.x * deltaTime;
+    this.position.y += this.velocity.y * deltaTime;
+    this.position.z += this.velocity.z * deltaTime;
 
-    // Update mesh position
+    // Update mesh position from physics body
     this.mesh.position.copy(this.position);
 
     // Update collision helper position
@@ -164,12 +183,6 @@ export class Ball implements GameObject {
     };
 
     this.applyVelocity(releaseVelocity);
-  }
-
-  // Handle collision with other objects
-  onCollision(other: GameObject): void {
-    // Can handle special collision effects here
-    // The physics system handles the actual collision resolution
   }
 
   private updateTrail(deltaTime: number): void {

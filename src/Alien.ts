@@ -502,7 +502,7 @@ export class Alien implements GameObject {
       }
       this.collisionHelper = null;
     }
-    
+
     // Clean up resources
     if (this.mesh.parent) {
       this.mesh.parent.remove(this.mesh);
@@ -520,10 +520,13 @@ export class Alien implements GameObject {
   }
 
   // Create a wireframe box to visualize the collision boundary
-  private createCollisionHelper(): void {
-    const scene = this.mesh.parent;
-    if (!scene) return;
-
+  public createCollisionHelper(): void {
+    if (this.isDestroyed) {
+      return;
+    }
+    if (this.collisionHelper) {
+      return;
+    }
     // Create a spherical helper that represents the alien's collision boundary
     const helperGeometry = new THREE.SphereGeometry(this.size.width / 2, 16, 8);
     const helperMaterial = new THREE.MeshBasicMaterial({
@@ -533,6 +536,18 @@ export class Alien implements GameObject {
 
     this.collisionHelper = new THREE.Mesh(helperGeometry, helperMaterial);
     this.collisionHelper.position.copy(this.mesh.position);
-    scene.add(this.collisionHelper);
+    this.game.scene.add(this.collisionHelper);
+  }
+
+  public removeCollisionHelper(): void {
+    // Remove alien helpers
+    if (this.collisionHelper) {
+      this.game.scene.remove(this.collisionHelper);
+      if (this.collisionHelper.geometry) this.collisionHelper.geometry.dispose();
+      if (this.collisionHelper.material instanceof THREE.Material) {
+        this.collisionHelper.material.dispose();
+      }
+      this.collisionHelper = null;
+    }
   }
 }

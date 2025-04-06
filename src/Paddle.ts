@@ -167,4 +167,34 @@ export class Paddle implements GameObject {
       this.mesh.material.dispose();
     }
   }
+
+  public createCollisionHelper(): void {
+    if (this.collisionHelper) {
+      return;
+    }
+    const helperGeometry = new THREE.BoxGeometry(
+      this.size.width,
+      this.size.height,
+      this.size.depth
+    );
+    const helperMaterial = new THREE.MeshBasicMaterial({
+      color: 0x0000ff,
+      wireframe: true,
+    });
+
+    this.collisionHelper = new THREE.Mesh(helperGeometry, helperMaterial);
+    this.collisionHelper.position.copy(this.position);
+    this.game.scene.add(this.collisionHelper);
+  }
+
+  public removeCollisionHelper(): void {
+    if (this.collisionHelper) {
+      this.game.scene.remove(this.collisionHelper);
+      if (this.collisionHelper.geometry) this.collisionHelper.geometry.dispose();
+      if (this.collisionHelper.material instanceof THREE.Material) {
+        this.collisionHelper.material.dispose();
+      }
+      this.collisionHelper = null;
+    }
+  }
 }
