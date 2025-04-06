@@ -43,6 +43,8 @@ export class PlayState implements IGameState {
 
   // Keyboard event listener for wireframe toggle
   private keydownListener: (event: KeyboardEvent) => void;
+  // Click event listener for ball release
+  private clickListener: (event: MouseEvent) => void;
 
   // Game state
   private state: GameState = GameState.READY;
@@ -118,6 +120,9 @@ export class PlayState implements IGameState {
 
     // Create keyboard event listener for wireframe toggle and game controls
     this.setupKeyboardControls();
+
+    // Create click listener for ball release
+    this.setupClickListener();
 
     // Create surface mesh
     this.createSurfaceMesh();
@@ -229,11 +234,34 @@ export class PlayState implements IGameState {
           this.startGame();
         } else if (this.state === GameState.GAME_OVER) {
           this.resetGame();
+        } else if (this.state === GameState.PLAYING) {
+          // Release the ball if it's attached to the paddle
+          this.releaseBall();
         }
       } else if (event.key === 'p' || event.key === 'P') {
         this.togglePause();
       }
     };
+  }
+
+  // Set up click event listener for ball release
+  private setupClickListener(): void {
+    this.clickListener = (event: MouseEvent) => {
+      // Only release the ball if we're in PLAYING state
+      if (this.state === GameState.PLAYING) {
+        this.releaseBall();
+      }
+    };
+  }
+
+  // Release the ball from the paddle
+  private releaseBall(): void {
+    for (const ball of this.balls) {
+      if (ball.isAttachedToPaddle) {
+        ball.releaseBall();
+        break; // Only release one ball at a time
+      }
+    }
   }
 
   private createPaddle(): Paddle {
@@ -253,6 +281,11 @@ export class PlayState implements IGameState {
     const ballRadius = 0.4;
     const ballPosition = { x: 0, y: this.bottomBoundary + 2, z: 0 };
     const ball = new Ball(this, ballRadius, ballPosition, this.scene);
+
+    // Ensure the ball starts on the paddle
+    if (this.paddles.length > 0) {
+      ball.attachToPaddle(this.paddles[0].position, this.paddles[0].size);
+    }
 
     // Add to scene
     this.scene.add(ball.mesh);
@@ -364,6 +397,24 @@ export class PlayState implements IGameState {
     document.body.appendChild(uiContainer);
     document.body.appendChild(this.messageElement);
 
+    // Instructions for ball release
+    const instructionsElement = document.createElement('div');
+    instructionsElement.id = 'instructions';
+    instructionsElement.style.position = 'absolute';
+    instructionsElement.style.bottom = '20px';
+    instructionsElement.style.left = '50%';
+    instructionsElement.style.transform = 'translateX(-50%)';
+    instructionsElement.style.color = 'white';
+    instructionsElement.style.fontFamily = 'monospace';
+    instructionsElement.style.fontSize = '16px';
+    instructionsElement.style.textShadow = '1px 1px 2px black';
+    instructionsElement.style.padding = '10px';
+    instructionsElement.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+    instructionsElement.style.borderRadius = '5px';
+    instructionsElement.style.textAlign = 'center';
+    instructionsElement.textContent = 'Click or press SPACE to release ball';
+    document.body.appendChild(instructionsElement);
+
     // Show initial message
     this.showMessage('PONG INVADERS\n\nPress SPACE to Start\n\nUse A/D or Arrow Keys to move');
   }
@@ -447,6 +498,11 @@ export class PlayState implements IGameState {
     };
     ball.reset(resetPosition);
 
+    // Attach ball to paddle
+    if (this.paddles.length > 0) {
+      ball.attachToPaddle(this.paddles[0].position, this.paddles[0].size);
+    }
+
     // Show message
     this.showMessage(`BALL LOST\n\nLives: ${this.lives}\n\nContinuing in 2 seconds...`);
 
@@ -480,6 +536,15 @@ export class PlayState implements IGameState {
     // Reset aliens with increased difficulty
     this.alienManager.reset();
     this.alienManager.setDifficulty(this.level);
+
+    // Reset ball position on paddle
+    const ballPosition = { x: 0, y: this.bottomBoundary + 2, z: 0 };
+    for (const ball of this.balls) {
+      ball.reset(ballPosition);
+      if (this.paddles.length > 0) {
+        ball.attachToPaddle(this.paddles[0].position, this.paddles[0].size);
+      }
+    }
   }
 
   private resetGame(): void {
@@ -502,6 +567,9 @@ export class PlayState implements IGameState {
     const ballPosition = { x: 0, y: this.bottomBoundary + 2, z: 0 };
     for (const ball of this.balls) {
       ball.reset(ballPosition);
+      if (this.paddles.length > 0) {
+        ball.attachToPaddle(this.paddles[0].position, this.paddles[0].size);
+      }
     }
 
     this.alienManager.reset();
@@ -806,6 +874,9 @@ export class PlayState implements IGameState {
     if (this.state === GameState.PLAYING) {
       // Check for collisions with aliens
       for (const ball of this.balls) {
+        // Skip balls that are still attached to the paddle
+        if (ball.isAttachedToPaddle) continue;
+
         const ballPosition = ball.mesh.position;
         const points = this.alienManager.checkCollisions(ball);
 
@@ -840,6 +911,11 @@ export class PlayState implements IGameState {
   private updatePhysics(deltaTime: number): void {
     // Update positions based on velocities
     for (const body of [...this.balls, ...this.paddles]) {
+      // Skip physics update for balls that are attached to the paddle
+      if (body instanceof Ball && body.isAttachedToPaddle) {
+        continue;
+      }
+
       // Update position based on velocity
       body.position.x += body.velocity.x * deltaTime;
       body.position.y += body.velocity.y * deltaTime;
@@ -852,6 +928,9 @@ export class PlayState implements IGameState {
     }
 
     for (const ball of this.balls) {
+      // Skip collision detection for balls attached to the paddle
+      if (ball.isAttachedToPaddle) continue;
+
       // 1. Ball with paddle collision
       for (const paddle of this.paddles) {
         const collision = this.ballVsBox(
@@ -909,11 +988,17 @@ export class PlayState implements IGameState {
   onEnter(): void {
     // Add keyboard event listener for wireframe toggle
     document.addEventListener('keydown', this.keydownListener);
+
+    // Add click listener for ball release
+    document.addEventListener('click', this.clickListener);
   }
 
   onExit(): void {
     // Remove keyboard event listener for wireframe toggle
     document.removeEventListener('keydown', this.keydownListener);
+
+    // Remove click listener for ball release
+    document.removeEventListener('click', this.clickListener);
 
     // Clean up resources
     this.dispose();
@@ -942,6 +1027,12 @@ export class PlayState implements IGameState {
     }
     if (this.messageElement) {
       this.messageElement.remove();
+    }
+
+    // Remove instructions
+    const instructionsElement = document.getElementById('instructions');
+    if (instructionsElement) {
+      instructionsElement.remove();
     }
   }
 

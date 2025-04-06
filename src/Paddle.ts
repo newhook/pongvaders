@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GameObject } from './types';
 import { PlayState } from './playState';
+import { Ball } from './Ball';
 
 export class Paddle implements GameObject {
   private game: PlayState;
@@ -78,6 +79,22 @@ export class Paddle implements GameObject {
 
     // Update mesh position
     this.mesh.position.copy(this.position);
+
+    // Update any attached ball
+    this.updateAttachedBall();
+  }
+
+  // Move any attached balls with the paddle
+  private updateAttachedBall(): void {
+    // Get all balls from the game
+    const balls = this.game.balls;
+
+    // Update position of any attached balls
+    for (const ball of balls) {
+      if (ball.isAttachedToPaddle) {
+        ball.attachToPaddle(this.position, this.size);
+      }
+    }
   }
 
   private setupEventListeners(): void {

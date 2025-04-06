@@ -9,14 +9,17 @@ export class Ball implements GameObject {
   public velocity: THREE.Vector3;
   public size: { radius: number };
 
+  // Flag to track if the ball is attached to the paddle
+  public isAttachedToPaddle: boolean = true;
+
   private radius: number;
   private initialVelocity: { x: number; y: number; z: number };
   private maxSpeed: number = 20;
   private trailParticles: THREE.Points[] = [];
   private scene: THREE.Scene | null = null;
   private trailLifetime: number = 0.5; // Trail lifetime in seconds
-  private lastTrailTime: number = 0;
   private trailInterval: number = 0.05; // Time between trail particles
+  private lastTrailTime: number = 0;
 
   constructor(
     game: PlayState,
@@ -58,8 +61,8 @@ export class Ball implements GameObject {
       z: 0, // No Z velocity initially
     };
 
-    // Apply initial velocity
-    this.applyVelocity(this.initialVelocity);
+    // Don't apply initial velocity when creating the ball
+    // This will be applied when the ball is released from the paddle
 
     // Add point light to ball for glow effect
     const light = new THREE.PointLight(0x88aaff, 1, 10);
@@ -80,6 +83,11 @@ export class Ball implements GameObject {
   }
 
   update(deltaTime: number): void {
+    // If attached to paddle, don't update physics
+    if (this.isAttachedToPaddle) {
+      return;
+    }
+
     // Update mesh position
     this.mesh.position.copy(this.position);
 
@@ -93,6 +101,41 @@ export class Ball implements GameObject {
     this.preventHorizontalStalemate();
   }
 
+  // Attach the ball to a specific position (usually on top of the paddle)
+  attachToPaddle(
+    paddlePosition: THREE.Vector3,
+    paddleSize: { width: number; height: number; depth: number }
+  ): void {
+    this.isAttachedToPaddle = true;
+
+    // Position the ball on top of the paddle
+    const ballY = paddlePosition.y + paddleSize.height / 2 + this.radius;
+    this.position.set(paddlePosition.x, ballY, paddlePosition.z);
+    this.mesh.position.copy(this.position);
+
+    // Zero out velocity while attached
+    this.velocity.set(0, 0, 0);
+
+    // Clear trail particles
+    this.clearTrail();
+  }
+
+  // Release the ball from the paddle with initial velocity
+  releaseBall(): void {
+    if (!this.isAttachedToPaddle) return;
+
+    this.isAttachedToPaddle = false;
+
+    // Apply initial velocity upward with random x direction
+    const releaseVelocity = {
+      x: (Math.random() * 2 - 1) * 5, // Random X direction
+      y: 8, // Always start moving up
+      z: 0, // No Z velocity initially
+    };
+
+    this.applyVelocity(releaseVelocity);
+  }
+
   // Handle collision with other objects
   onCollision(other: GameObject): void {
     // Can handle special collision effects here
@@ -100,6 +143,9 @@ export class Ball implements GameObject {
   }
 
   private updateTrail(deltaTime: number): void {
+    // Don't create trail when attached to paddle
+    if (this.isAttachedToPaddle) return;
+
     const now = performance.now() / 1000;
 
     // Add new trail particle at intervals
@@ -200,14 +246,11 @@ export class Ball implements GameObject {
     this.position.set(position.x, position.y, position.z);
     this.mesh.position.copy(this.position);
 
-    // Reset velocity with random x direction
-    const resetVelocity = {
-      x: (Math.random() * 2 - 1) * 5,
-      y: -8, // Always start moving down
-      z: 0,
-    };
+    // Set as attached to paddle
+    this.isAttachedToPaddle = true;
 
-    this.applyVelocity(resetVelocity);
+    // Reset velocity to zero (will be set when released)
+    this.velocity.set(0, 0, 0);
 
     // Clear trail particles
     this.clearTrail();
