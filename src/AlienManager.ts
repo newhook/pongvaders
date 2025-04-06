@@ -217,21 +217,18 @@ export class AlienManager implements GameObject {
         const alienPos = alien.translation();
         const alienRadius = alien.size.width / 2;
 
-        // Calculate distance between ball and alien
+        // Calculate distance between ball and alien (ignoring z coordinate for 2D collision)
         const distance = Math.sqrt(
-          Math.pow(ballPosition.x - alienPos.x, 2) +
-            Math.pow(ballPosition.y - alienPos.y, 2) +
-            Math.pow(ballPosition.z - alienPos.z, 2)
+          Math.pow(ballPosition.x - alienPos.x, 2) + Math.pow(ballPosition.y - alienPos.y, 2)
         );
 
         // If collision detected
         if (distance < ballRadius + alienRadius) {
-          console.log('Collision detected!');
           // Calculate normal vector (direction from alien to ball)
           const normal = new THREE.Vector3(
             ballPosition.x - alienPos.x,
             ballPosition.y - alienPos.y,
-            ballPosition.z - alienPos.z
+            0 // Set z component to 0 to keep bounce reflections in the xy plane
           ).normalize();
 
           // Calculate dot product for reflection
