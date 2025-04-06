@@ -1,11 +1,16 @@
 import * as THREE from 'three';
 import { GameObject } from './types';
-import { PlayState, SimplePhysicsBody } from './playState';
+import { PlayState } from './playState';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 
 export class Alien implements GameObject {
+  private game: PlayState;
   public mesh: THREE.Mesh;
-  public body: SimplePhysicsBody;
+  public position: THREE.Vector3;
+  public velocity: THREE.Vector3;
+  public isStatic: boolean = true;
+  public isBall: boolean = false;
+  public isPaddle: boolean = false;
   public size: { width: number; height: number; depth: number };
   public isDestroyed: boolean = false;
   public points: number; // Points awarded when destroyed
@@ -23,9 +28,14 @@ export class Alien implements GameObject {
     position: { x: number; y: number; z: number },
     type: 'small' | 'medium' | 'large' = 'medium'
   ) {
+    this.game = game;
     this.size = size;
     this.initialY = position.y;
     this.hoverOffset = Math.random() * Math.PI * 2; // Random start position in hover cycle
+
+    // Initialize position and velocity vectors (formerly in SimplePhysicsBody)
+    this.position = new THREE.Vector3(position.x, position.y, position.z);
+    this.velocity = new THREE.Vector3(0, 0, 0);
 
     // Set points based on alien type
     switch (type) {
@@ -76,16 +86,45 @@ export class Alien implements GameObject {
     this.mesh.receiveShadow = true;
     this.mesh.position.set(position.x, position.y, position.z);
 
-    // Create physics body with simplified physics
-    this.body = new SimplePhysicsBody(position, true, false, false, size);
-    game.addBody(this);
-
     // Create animation mixer if needed
     this.animationMixer = new THREE.AnimationMixer(this.mesh);
     this.setupAnimations();
 
     // Add eyes/details based on alien type
     this.addAlienDetails(type);
+  }
+
+  // SimplePhysicsBody methods merged directly into Alien
+  translation(): { x: number; y: number; z: number } {
+    return { x: this.position.x, y: this.position.y, z: this.position.z };
+  }
+
+  setNextKinematicTranslation(position: { x: number; y: number; z: number }): void {
+    this.position.set(position.x, position.y, position.z);
+  }
+
+  setTranslation(position: { x: number; y: number; z: number }): void {
+    this.position.set(position.x, position.y, position.z);
+  }
+
+  linvel(): { x: number; y: number; z: number } {
+    return { x: this.velocity.x, y: this.velocity.y, z: this.velocity.z };
+  }
+
+  setLinvel(velocity: { x: number; y: number; z: number }): void {
+    this.velocity.set(velocity.x, velocity.y, velocity.z);
+  }
+
+  applyImpulse(impulse: { x: number; y: number; z: number }): void {
+    if (!this.isStatic) {
+      this.velocity.x += impulse.x;
+      this.velocity.y += impulse.y;
+      this.velocity.z += impulse.z;
+    }
+  }
+
+  rotation(): { x: number; y: number; z: number; w: number } {
+    return { x: 0, y: 0, z: 0, w: 1 };
   }
 
   private getAlienColor(type: 'small' | 'medium' | 'large'): number {
@@ -275,10 +314,10 @@ export class Alien implements GameObject {
     const hoverY = Math.sin(time * this.hoverFrequency + this.hoverOffset) * this.hoverAmplitude;
 
     // Get current position
-    const position = this.body.translation();
+    const position = this.translation();
 
     // Update position with hover effect
-    this.body.setNextKinematicTranslation({
+    this.setNextKinematicTranslation({
       x: position.x,
       y: this.initialY + hoverY,
       z: position.z,
@@ -293,8 +332,8 @@ export class Alien implements GameObject {
     this.initialY -= amount;
 
     // Update position
-    const position = this.body.translation();
-    this.body.setNextKinematicTranslation({
+    const position = this.translation();
+    this.setNextKinematicTranslation({
       x: position.x,
       y: this.initialY,
       z: position.z,
@@ -338,7 +377,7 @@ export class Alien implements GameObject {
   }
 
   private createExplosionEffect(): void {
-    const position = this.body.translation();
+    const position = this.translation();
 
     // Create explosion particles
     const particleCount = 30;

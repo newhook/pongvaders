@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { GameObject } from './types';
-import { PlayState, SimplePhysicsBody } from './playState';
+import { PlayState } from './playState';
 
 export class Ball implements GameObject {
+  private game: PlayState;
   public mesh: THREE.Mesh;
   public position: THREE.Vector3;
   public velocity: THREE.Vector3;
@@ -10,7 +11,6 @@ export class Ball implements GameObject {
   public isBall: boolean = true;
   public isPaddle: boolean = false;
   public size: { radius: number };
-  public body: any; // Reference to physics body
 
   private radius: number;
   private initialVelocity: { x: number; y: number; z: number };
@@ -27,6 +27,7 @@ export class Ball implements GameObject {
     position: { x: number; y: number; z: number },
     scene: THREE.Scene
   ) {
+    this.game = game;
     this.radius = radius;
     this.scene = scene;
     this.size = { radius };
@@ -34,9 +35,6 @@ export class Ball implements GameObject {
     // Create position and velocity vectors
     this.position = new THREE.Vector3(position.x, position.y, position.z);
     this.velocity = new THREE.Vector3(0, 0, 0);
-
-    // Create physics body
-    this.body = new SimplePhysicsBody(position, false, true, false, { radius });
 
     // Create ball geometry
     const geometry = new THREE.SphereGeometry(radius, 24, 16);
@@ -66,9 +64,6 @@ export class Ball implements GameObject {
     // Apply initial velocity
     this.applyVelocity(this.initialVelocity);
 
-    // Add this ball to physics system
-    game.addBody(this, this.onCollision.bind(this));
-
     // Add point light to ball for glow effect
     const light = new THREE.PointLight(0x88aaff, 1, 10);
     light.position.set(0, 0, 0);
@@ -87,14 +82,40 @@ export class Ball implements GameObject {
     this.mesh.add(glowMesh);
   }
 
+  // SimplePhysicsBody methods merged directly into Ball
+  translation(): { x: number; y: number; z: number } {
+    return { x: this.position.x, y: this.position.y, z: this.position.z };
+  }
+
+  setNextKinematicTranslation(position: { x: number; y: number; z: number }): void {
+    this.position.set(position.x, position.y, position.z);
+  }
+
+  setTranslation(position: { x: number; y: number; z: number }): void {
+    this.position.set(position.x, position.y, position.z);
+  }
+
+  linvel(): { x: number; y: number; z: number } {
+    return { x: this.velocity.x, y: this.velocity.y, z: this.velocity.z };
+  }
+
+  setLinvel(velocity: { x: number; y: number; z: number }): void {
+    this.velocity.set(velocity.x, velocity.y, velocity.z);
+  }
+
+  applyImpulse(impulse: { x: number; y: number; z: number }): void {
+    if (!this.isStatic) {
+      this.velocity.x += impulse.x;
+      this.velocity.y += impulse.y;
+      this.velocity.z += impulse.z;
+    }
+  }
+
+  rotation(): { x: number; y: number; z: number; w: number } {
+    return { x: 0, y: 0, z: 0, w: 1 };
+  }
+
   update(deltaTime: number): void {
-    // Update local position and velocity from physics body
-    const bodyPos = this.body.translation();
-    const bodyVel = this.body.linvel();
-
-    this.position.set(bodyPos.x, bodyPos.y, bodyPos.z);
-    this.velocity.set(bodyVel.x, bodyVel.y, bodyVel.z);
-
     // Update mesh position
     this.mesh.position.copy(this.position);
 
@@ -192,9 +213,6 @@ export class Ball implements GameObject {
       this.velocity.x *= scale;
       this.velocity.y *= scale;
       this.velocity.z *= scale;
-
-      // Update physics body velocity
-      this.body.setLinvel(this.velocity);
     }
   }
 
@@ -204,20 +222,12 @@ export class Ball implements GameObject {
     // If y velocity is too small, add some
     if (Math.abs(this.velocity.y) < minYSpeed) {
       this.velocity.y = this.velocity.y < 0 ? -minYSpeed : minYSpeed;
-
-      // Update physics body velocity
-      this.body.setLinvel(this.velocity);
     }
   }
 
   // Apply velocity to the ball
   applyVelocity(velocity: { x: number; y: number; z: number }): void {
     this.velocity.set(velocity.x, velocity.y, velocity.z);
-
-    // Update physics body velocity
-    if (this.body) {
-      this.body.setLinvel(velocity);
-    }
   }
 
   // Reset the ball position and apply a new random velocity
@@ -225,9 +235,6 @@ export class Ball implements GameObject {
     // Reset position
     this.position.set(position.x, position.y, position.z);
     this.mesh.position.copy(this.position);
-
-    // Update physics body position
-    this.body.setTranslation(position);
 
     // Reset velocity with random x direction
     const resetVelocity = {
@@ -266,9 +273,6 @@ export class Ball implements GameObject {
     }
 
     this.clearTrail();
-
-    // Remove from physics system
-    this.physicsWorld.removeBody(this);
 
     if (this.mesh.geometry) {
       this.mesh.geometry.dispose();

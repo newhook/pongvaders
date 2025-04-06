@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { GameObject } from './types';
-import { PlayState, SimplePhysicsBody } from './playState';
+import { PlayState } from './playState';
 
 export class Paddle implements GameObject {
+  private game: PlayState;
   public mesh: THREE.Mesh;
   public position: THREE.Vector3;
   public velocity: THREE.Vector3;
@@ -10,7 +11,6 @@ export class Paddle implements GameObject {
   public isBall: boolean = false;
   public isPaddle: boolean = true;
   public size: { width: number; height: number; depth: number };
-  public body: any; // Reference to physics body
 
   private speed: number = 15; // Movement speed
   private boundaries: { min: number; max: number };
@@ -24,14 +24,12 @@ export class Paddle implements GameObject {
     position: { x: number; y: number; z: number },
     worldSize: number
   ) {
+    this.game = game;
     this.size = size;
 
     // Create position and velocity vectors
     this.position = new THREE.Vector3(position.x, position.y, position.z);
     this.velocity = new THREE.Vector3(0, 0, 0);
-
-    // Create physics body
-    this.body = new SimplePhysicsBody(position, false, false, true, size);
 
     // Create paddle geometry - wider than tall
     const geometry = new THREE.BoxGeometry(size.width, size.height, size.depth);
@@ -53,9 +51,6 @@ export class Paddle implements GameObject {
 
     this.targetPosition = position.x;
 
-    // Add to physics system
-    game.addBody(this);
-
     // Set movement boundaries based on world size
     this.boundaries = {
       min: -worldSize / 2 + size.width / 2,
@@ -64,6 +59,39 @@ export class Paddle implements GameObject {
 
     // Set up keyboard event listeners
     this.setupEventListeners();
+  }
+
+  // SimplePhysicsBody methods merged directly into Paddle
+  translation(): { x: number; y: number; z: number } {
+    return { x: this.position.x, y: this.position.y, z: this.position.z };
+  }
+
+  setNextKinematicTranslation(position: { x: number; y: number; z: number }): void {
+    this.position.set(position.x, position.y, position.z);
+  }
+
+  setTranslation(position: { x: number; y: number; z: number }): void {
+    this.position.set(position.x, position.y, position.z);
+  }
+
+  linvel(): { x: number; y: number; z: number } {
+    return { x: this.velocity.x, y: this.velocity.y, z: this.velocity.z };
+  }
+
+  setLinvel(velocity: { x: number; y: number; z: number }): void {
+    this.velocity.set(velocity.x, velocity.y, velocity.z);
+  }
+
+  applyImpulse(impulse: { x: number; y: number; z: number }): void {
+    if (!this.isStatic) {
+      this.velocity.x += impulse.x;
+      this.velocity.y += impulse.y;
+      this.velocity.z += impulse.z;
+    }
+  }
+
+  rotation(): { x: number; y: number; z: number; w: number } {
+    return { x: 0, y: 0, z: 0, w: 1 };
   }
 
   update(deltaTime: number): void {
@@ -83,11 +111,6 @@ export class Paddle implements GameObject {
 
     // Set new position
     this.position.x = this.targetPosition;
-    this.position.y = this.body.position.y;
-    this.position.z = this.body.position.z;
-
-    // Update physics body
-    this.body.setNextKinematicTranslation(this.position);
 
     // Update mesh position
     this.mesh.position.copy(this.position);
@@ -140,9 +163,6 @@ export class Paddle implements GameObject {
     this.position.set(position.x, position.y, position.z);
     this.mesh.position.copy(this.position);
 
-    // Update physics body
-    this.body.setTranslation(position);
-
     this.isLeftPressed = false;
     this.isRightPressed = false;
   }
@@ -150,9 +170,6 @@ export class Paddle implements GameObject {
   // Clean up resources
   dispose(): void {
     this.removeEventListeners();
-
-    // Remove from physics system
-    // this.game.removeBody(this);
 
     if (this.mesh.parent) {
       this.mesh.parent.remove(this.mesh);

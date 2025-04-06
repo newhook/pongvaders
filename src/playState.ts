@@ -8,70 +8,6 @@ import { Paddle } from './Paddle';
 import { Ball } from './Ball';
 import { AlienManager } from './AlienManager';
 
-// Simple physics body directly in PlayState
-export class SimplePhysicsBody {
-  position: THREE.Vector3;
-  velocity: THREE.Vector3;
-  isStatic: boolean;
-  isBall: boolean;
-  isPaddle: boolean;
-  size: { width: number; height: number; depth: number } | { radius: number };
-
-  constructor(
-    position: { x: number; y: number; z: number },
-    isStatic: boolean = false,
-    isBall: boolean = false,
-    isPaddle: boolean = false,
-    size: any
-  ) {
-    this.position = new THREE.Vector3(position.x, position.y, position.z);
-    this.velocity = new THREE.Vector3(0, 0, 0);
-    this.isStatic = isStatic;
-    this.isBall = isBall;
-    this.isPaddle = isPaddle;
-    this.size = size;
-  }
-
-  // Get current position
-  translation(): { x: number; y: number; z: number } {
-    return { x: this.position.x, y: this.position.y, z: this.position.z };
-  }
-
-  // Move a kinematic body (like paddles)
-  setNextKinematicTranslation(position: { x: number; y: number; z: number }): void {
-    this.position.set(position.x, position.y, position.z);
-  }
-
-  // Set position
-  setTranslation(position: { x: number; y: number; z: number }): void {
-    this.position.set(position.x, position.y, position.z);
-  }
-
-  // Get velocity
-  linvel(): { x: number; y: number; z: number } {
-    return { x: this.velocity.x, y: this.velocity.y, z: this.velocity.z };
-  }
-
-  // Set velocity
-  setLinvel(velocity: { x: number; y: number; z: number }): void {
-    this.velocity.set(velocity.x, velocity.y, velocity.z);
-  }
-
-  // Add to velocity
-  applyImpulse(impulse: { x: number; y: number; z: number }): void {
-    if (!this.isStatic) {
-      this.velocity.x += impulse.x;
-      this.velocity.y += impulse.y;
-      this.velocity.z += impulse.z;
-    }
-  }
-
-  // For compatibility with existing code - returns empty quaternion
-  rotation(): { x: number; y: number; z: number; w: number } {
-    return { x: 0, y: 0, z: 0, w: 1 };
-  }
-}
-
 // Game states
 enum GameState {
   READY, // Initial state, waiting for player to start
@@ -84,7 +20,6 @@ enum GameState {
 export class PlayState implements IGameState {
   public gameStateManager: GameStateManager;
   scene: THREE.Scene;
-  physicsObjects: { gameObj: GameObject; collisionCallback?: (other: GameObject) => void }[] = [];
   gravity: number = 0; // No gravity for pong/breakout!
   worldBounds: {
     minX: number;
@@ -220,23 +155,8 @@ export class PlayState implements IGameState {
     this.gameObjects.push(this.ball);
   }
 
-  // Physics methods integrated directly into PlayState
-  addBody(gameObject: GameObject, collisionCallback?: (other: GameObject) => void): void {
-    this.physicsObjects.push({
-      gameObj: gameObject,
-      collisionCallback: collisionCallback,
-    });
-  }
-
-  removeBody(gameObject: GameObject): void {
-    const index = this.physicsObjects.findIndex((obj) => obj.gameObj === gameObject);
-    if (index !== -1) {
-      this.physicsObjects.splice(index, 1);
-    }
-  }
-
   getPhysicsObjectCount(): number {
-    return this.physicsObjects.length;
+    return this.gameObjects.length;
   }
 
   // Simple collision detection integrated into PlayState
@@ -272,7 +192,7 @@ export class PlayState implements IGameState {
 
   // Simple collision resolution for ball vs box
   private resolveBallBoxCollision(
-    ball: SimplePhysicsBody,
+    ball: GameObject,
     boxPos: THREE.Vector3,
     boxSize: { width: number; height: number; depth: number }
   ): void {
@@ -955,9 +875,7 @@ export class PlayState implements IGameState {
   // Physics update function integrated into PlayState
   private updatePhysics(deltaTime: number): void {
     // Update positions based on velocities
-    for (const obj of this.physicsObjects) {
-      const body = obj.gameObj.body;
-
+    for (const body of this.gameObjects) {
       if (!body.isStatic) {
         // Apply gravity
         body.velocity.y -= this.gravity * deltaTime;
@@ -969,8 +887,8 @@ export class PlayState implements IGameState {
       }
 
       // Update mesh position from physics body
-      if (obj.gameObj.mesh) {
-        obj.gameObj.mesh.position.copy(body.position);
+      if (body.mesh) {
+        body.mesh.position.copy(body.position);
       }
     }
 
@@ -984,13 +902,11 @@ export class PlayState implements IGameState {
   // Check for collisions between objects
   private checkCollisions(): void {
     // Simple O(n²) collision check - fine for small number of objects
-    for (let i = 0; i < this.physicsObjects.length; i++) {
-      const objA = this.physicsObjects[i];
-      const bodyA = objA.gameObj.body;
+    for (let i = 0; i < this.gameObjects.length; i++) {
+      const bodyA = this.gameObjects[i];
 
-      for (let j = i + 1; j < this.physicsObjects.length; j++) {
-        const objB = this.physicsObjects[j];
-        const bodyB = objB.gameObj.body;
+      for (let j = i + 1; j < this.gameObjects.length; j++) {
+        const bodyB = this.gameObjects[j];
 
         // Skip static vs static collisions
         if (bodyA.isStatic && bodyB.isStatic) continue;
@@ -1043,8 +959,8 @@ export class PlayState implements IGameState {
 
         // Handle collision callbacks
         if (collision) {
-          if (objA.collisionCallback) objA.collisionCallback(objB.gameObj);
-          if (objB.collisionCallback) objB.collisionCallback(objA.gameObj);
+          if (bodyA.onCollision) bodyA.onCollision(bodyB);
+          if (bodyB.onCollision) bodyB.onCollision(bodyA);
         }
       }
     }
@@ -1052,9 +968,7 @@ export class PlayState implements IGameState {
 
   // Keep objects within world bounds
   private keepObjectsInBounds(): void {
-    for (const obj of this.physicsObjects) {
-      const body = obj.gameObj.body;
-
+    for (const body of this.gameObjects) {
       // Only handle ball bounds collision
       if (body.isBall) {
         const radius = (body.size as { radius: number }).radius;
