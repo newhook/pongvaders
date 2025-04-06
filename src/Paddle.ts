@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GameObject } from './types';
-import { PhysicsSystem } from './physics';
+import { SimplePhysics, createPaddle } from './fakePhysics';
 
 export class Paddle implements GameObject {
   public mesh: THREE.Mesh;
@@ -10,26 +10,30 @@ export class Paddle implements GameObject {
   public isBall: boolean = false;
   public isPaddle: boolean = true;
   public size: { width: number; height: number; depth: number };
+  public body: any; // Reference to physics body
 
   private speed: number = 15; // Movement speed
   private boundaries: { min: number; max: number };
   private targetPosition: number = 0;
   private isLeftPressed: boolean = false;
   private isRightPressed: boolean = false;
-  private physicsSystem: PhysicsSystem;
+  private physicsWorld: SimplePhysics;
 
   constructor(
     size: { width: number; height: number; depth: number },
     position: { x: number; y: number; z: number },
-    physicsSystem: PhysicsSystem,
+    physicsWorld: SimplePhysics,
     worldSize: number
   ) {
     this.size = size;
-    this.physicsSystem = physicsSystem;
+    this.physicsWorld = physicsWorld;
 
     // Create position and velocity vectors
     this.position = new THREE.Vector3(position.x, position.y, position.z);
     this.velocity = new THREE.Vector3(0, 0, 0);
+
+    // Create physics body
+    this.body = createPaddle(size, position);
 
     // Create paddle geometry - wider than tall
     const geometry = new THREE.BoxGeometry(size.width, size.height, size.depth);
@@ -52,7 +56,7 @@ export class Paddle implements GameObject {
     this.targetPosition = position.x;
 
     // Add to physics system
-    physicsSystem.addObject(this);
+    physicsWorld.addBody(this);
 
     // Set movement boundaries based on world size
     this.boundaries = {
@@ -81,15 +85,14 @@ export class Paddle implements GameObject {
 
     // Set new position
     this.position.x = this.targetPosition;
+    this.position.y = this.body.position.y;
+    this.position.z = this.body.position.z;
+
+    // Update physics body
+    this.body.setNextKinematicTranslation(this.position);
 
     // Update mesh position
     this.mesh.position.copy(this.position);
-  }
-
-  // Collision detection with other game objects
-  checkCollision(other: GameObject): boolean {
-    // We don't need to implement this as the ball handles collisions with the paddle
-    return false;
   }
 
   private setupEventListeners(): void {
@@ -138,6 +141,10 @@ export class Paddle implements GameObject {
     this.targetPosition = position.x;
     this.position.set(position.x, position.y, position.z);
     this.mesh.position.copy(this.position);
+
+    // Update physics body
+    this.body.setTranslation(position);
+
     this.isLeftPressed = false;
     this.isRightPressed = false;
   }
@@ -147,7 +154,7 @@ export class Paddle implements GameObject {
     this.removeEventListeners();
 
     // Remove from physics system
-    this.physicsSystem.removeObject(this);
+    this.physicsWorld.removeBody(this);
 
     if (this.mesh.parent) {
       this.mesh.parent.remove(this.mesh);

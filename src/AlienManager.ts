@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Alien } from './Alien';
-import { PhysicsWorld } from './physics';
+import { SimplePhysics } from './fakePhysics';
 import { GameObject } from './types';
 
 // Direction of alien swarm movement
@@ -9,7 +9,7 @@ type SwarmDirection = 'left' | 'right';
 export class AlienManager implements GameObject {
   private aliens: Alien[] = [];
   private scene: THREE.Scene;
-  private physicsWorld: PhysicsWorld;
+  private physicsWorld: SimplePhysics;
 
   private rows: number = 5;
   private columns: number = 9;
@@ -34,7 +34,7 @@ export class AlienManager implements GameObject {
 
   constructor(
     scene: THREE.Scene,
-    physicsWorld: PhysicsWorld,
+    physicsWorld: SimplePhysics,
     worldSize: number,
     bottomBoundary: number = 1.0
   ) {
