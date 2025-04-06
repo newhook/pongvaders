@@ -901,69 +901,35 @@ export class PlayState implements IGameState {
 
   // Check for collisions between objects
   private checkCollisions(): void {
-    // Simple O(n²) collision check - fine for small number of objects
-    for (let i = 0; i < this.gameObjects.length; i++) {
-      const bodyA = this.gameObjects[i];
+    // Ball is the only dynamic object that collides with other objects
+    const ball = this.ball;
 
-      for (let j = i + 1; j < this.gameObjects.length; j++) {
-        const bodyB = this.gameObjects[j];
+    // Only check collisions if ball exists
+    if (!ball) return;
 
-        // Skip static vs static collisions
-        if (bodyA.isStatic && bodyB.isStatic) continue;
+    // 1. Ball with paddle collision
+    if (this.paddle) {
+      const collision = this.ballVsBox(
+        ball.position,
+        (ball.size as { radius: number }).radius,
+        this.paddle.position,
+        this.paddle.size
+      );
 
-        let collision = false;
+      if (collision) {
+        // Resolve collision
+        this.resolveBallBoxCollision(ball, this.paddle.position, this.paddle.size);
 
-        // Ball vs ball
-        if (bodyA.isBall && bodyB.isBall) {
-          collision = this.ballVsBall(
-            bodyA.position,
-            (bodyA.size as { radius: number }).radius,
-            bodyB.position,
-            (bodyB.size as { radius: number }).radius
-          );
-        }
-        // Ball vs box
-        else if (bodyA.isBall && !bodyB.isBall) {
-          collision = this.ballVsBox(
-            bodyA.position,
-            (bodyA.size as { radius: number }).radius,
-            bodyB.position,
-            bodyB.size as { width: number; height: number; depth: number }
-          );
-
-          if (collision) {
-            this.resolveBallBoxCollision(
-              bodyA,
-              bodyB.position,
-              bodyB.size as { width: number; height: number; depth: number }
-            );
-          }
-        }
-        // Box vs ball
-        else if (!bodyA.isBall && bodyB.isBall) {
-          collision = this.ballVsBox(
-            bodyB.position,
-            (bodyB.size as { radius: number }).radius,
-            bodyA.position,
-            bodyA.size as { width: number; height: number; depth: number }
-          );
-
-          if (collision) {
-            this.resolveBallBoxCollision(
-              bodyB,
-              bodyA.position,
-              bodyA.size as { width: number; height: number; depth: number }
-            );
-          }
-        }
-
-        // Handle collision callbacks
-        if (collision) {
-          if (bodyA.onCollision) bodyA.onCollision(bodyB);
-          if (bodyB.onCollision) bodyB.onCollision(bodyA);
-        }
+        // Trigger collision callbacks if needed
+        if (ball.onCollision) ball.onCollision(this.paddle);
+        if (this.paddle.onCollision) this.paddle.onCollision(ball);
       }
     }
+
+    // 2. Ball with aliens is already handled in the alienManager.checkCollisions
+    // which is called in the update method
+
+    // 3. Ball with walls is handled in keepObjectsInBounds method
   }
 
   // Keep objects within world bounds
