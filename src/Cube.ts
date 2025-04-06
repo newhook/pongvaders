@@ -1,11 +1,10 @@
 import * as THREE from 'three';
-import RAPIER from '@dimforge/rapier3d';
-import { PhysicsWorld, createObstacleBody } from './physics';
+import { PhysicsWorld, FakeRigidBody, FakeWorld, createObstacleBody } from './fakePhysics';
 import { GameObject } from './types';
 
 export class Cube implements GameObject {
   public mesh: THREE.Mesh;
-  public body: RAPIER.RigidBody;
+  public body: FakeRigidBody;
   public mass: number;
   public size: { width: number; height: number; depth: number };
 
@@ -21,7 +20,7 @@ export class Cube implements GameObject {
     size: number,
     material: THREE.Material,
     position: { x: number; y: number; z: number },
-    physicsWorld: RAPIER.World,
+    physicsWorld: FakeWorld,
     mass: number = 1.0
   ) {
     // Create cube geometry
@@ -32,7 +31,7 @@ export class Cube implements GameObject {
     this.mesh.castShadow = true;
     this.mesh.receiveShadow = true;
 
-    // Create physics body for the cube
+    // Create physics body for the cube using fake physics
     this.body = createObstacleBody(
       { width: size, height: size, depth: size },
       position,
@@ -183,7 +182,7 @@ export class Cube implements GameObject {
   }
 
   // Spawn smaller debris for the explosion
-  private spawnDebris(position: RAPIER.Vector3, count: number): void {
+  private spawnDebris(position: THREE.Vector3, count: number): void {
     if (!this.scene || !this.physicsWorld) return;
 
     const debrisSize = this.size.width / 4;

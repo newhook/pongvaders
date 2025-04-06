@@ -1,11 +1,10 @@
 import * as THREE from 'three';
-import RAPIER from '@dimforge/rapier3d';
-import { PhysicsWorld } from './physics';
+import { SimplePhysics, SimpleBody, createPaddle } from './fakePhysics';
 import { GameObject } from './types';
 
 export class Paddle implements GameObject {
   public mesh: THREE.Mesh;
-  public body: RAPIER.RigidBody;
+  public body: SimpleBody;
   public size: { width: number; height: number; depth: number };
   private speed: number = 15; // Movement speed
   private boundaries: { min: number; max: number };
@@ -16,7 +15,7 @@ export class Paddle implements GameObject {
   constructor(
     size: { width: number; height: number; depth: number },
     position: { x: number; y: number; z: number },
-    physicsWorld: PhysicsWorld,
+    physicsWorld: SimplePhysics,
     worldSize: number
   ) {
     // Create paddle geometry - wider than tall
@@ -37,29 +36,12 @@ export class Paddle implements GameObject {
     this.mesh.receiveShadow = true;
     this.mesh.position.set(position.x, position.y, position.z);
 
-    // Create rigid body descriptor for paddle
-    const bodyDesc = RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(
-      position.x,
-      position.y,
-      position.z
-    );
+    // Create physics body
+    this.body = createPaddle(size, position);
+    this.targetPosition = position.x;
 
-    // Create rigid body
-    this.body = physicsWorld.world.createRigidBody(bodyDesc);
-
-    // Create collider for paddle
-    const colliderDesc = RAPIER.ColliderDesc.cuboid(
-      size.width / 2, // half-width
-      size.height / 2, // half-height
-      size.depth / 2 // half-depth
-    );
-
-    // Set physics material properties
-    colliderDesc.setFriction(0.2);
-    colliderDesc.setRestitution(1.2); // Bouncy paddle
-
-    // Create collider
-    physicsWorld.world.createCollider(colliderDesc, this.body);
+    // Add to physics world
+    physicsWorld.addBody(this);
 
     // Store size
     this.size = size;

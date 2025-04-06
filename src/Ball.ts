@@ -1,11 +1,10 @@
 import * as THREE from 'three';
-import RAPIER from '@dimforge/rapier3d';
-import { PhysicsWorld } from './physics';
+import { SimplePhysics, SimpleBody, createBall } from './fakePhysics';
 import { GameObject } from './types';
 
 export class Ball implements GameObject {
   public mesh: THREE.Mesh;
-  public body: RAPIER.RigidBody;
+  public body: SimpleBody;
   private radius: number;
   private initialVelocity: { x: number; y: number; z: number };
   private maxSpeed: number = 20;
@@ -18,7 +17,7 @@ export class Ball implements GameObject {
   constructor(
     radius: number,
     position: { x: number; y: number; z: number },
-    physicsWorld: PhysicsWorld,
+    physicsWorld: SimplePhysics,
     scene: THREE.Scene
   ) {
     this.radius = radius;
@@ -42,21 +41,8 @@ export class Ball implements GameObject {
     this.mesh.receiveShadow = true;
     this.mesh.position.set(position.x, position.y, position.z);
 
-    // Create rigid body
-    const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
-      .setTranslation(position.x, position.y, position.z)
-      .setLinearDamping(0) // No damping to keep ball moving
-      .setAngularDamping(0.5); // Some angular damping
-
-    this.body = physicsWorld.world.createRigidBody(bodyDesc);
-
-    // Create collider
-    const colliderDesc = RAPIER.ColliderDesc.ball(radius);
-    colliderDesc.setRestitution(1.0); // Perfect bounce
-    colliderDesc.setFriction(0.0); // No friction for smooth movement
-    colliderDesc.setDensity(1.0); // Standard density
-
-    physicsWorld.world.createCollider(colliderDesc, this.body);
+    // Create physics body using simple ball creator
+    this.body = createBall(radius, position);
 
     // Save initial velocity for resets
     this.initialVelocity = {
@@ -67,6 +53,9 @@ export class Ball implements GameObject {
 
     // Apply initial velocity
     this.applyVelocity(this.initialVelocity);
+
+    // Add this ball to physics world
+    physicsWorld.addBody(this);
 
     // Add point light to ball for glow effect
     const light = new THREE.PointLight(0x88aaff, 1, 10);

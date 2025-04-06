@@ -1,9 +1,8 @@
 import * as THREE from 'three';
-import RAPIER from '@dimforge/rapier3d';
+import { SimplePhysics, SimpleBody, createStaticBox } from './fakePhysics';
 import { Paddle } from './Paddle';
 import { Ball } from './Ball';
 import { AlienManager } from './AlienManager';
-import { PhysicsWorld } from './physics';
 import { GameObject } from './types';
 
 // Game states
@@ -17,7 +16,7 @@ enum GameState {
 
 export class GameManager implements GameObject {
   private scene: THREE.Scene;
-  private physicsWorld: PhysicsWorld;
+  private physicsWorld: SimplePhysics;
   private worldSize: number;
 
   // Game objects
@@ -44,10 +43,25 @@ export class GameManager implements GameObject {
   // Ball lost tracking
   private ballLostTimeout: number | null = null;
 
-  constructor(scene: THREE.Scene, physicsWorld: PhysicsWorld, worldSize: number) {
+  // For GameObject interface
+  public mesh: THREE.Mesh;
+  public body: SimpleBody;
+
+  constructor(scene: THREE.Scene, physicsWorld: SimplePhysics, worldSize: number) {
     this.scene = scene;
     this.physicsWorld = physicsWorld;
     this.worldSize = worldSize;
+
+    // Create invisible dummy mesh and body to satisfy GameObject interface
+    const dummyGeometry = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+    const dummyMaterial = new THREE.MeshBasicMaterial({ visible: false });
+    this.mesh = new THREE.Mesh(dummyGeometry, dummyMaterial);
+
+    // Create invisible dummy rigid body
+    this.body = createStaticBox({ width: 0.1, height: 0.1, depth: 0.1 }, { x: 0, y: 0, z: 0 });
+
+    // Hide dummy mesh
+    this.mesh.visible = false;
 
     // Create game elements
     this.paddle = this.createPaddle();
@@ -143,43 +157,8 @@ export class GameManager implements GameObject {
     topWallMesh.position.set(0, 30, 0);
     this.scene.add(topWallMesh);
 
-    // Create physics bodies for walls
-
-    // Left Wall
-    const leftWallBody = this.physicsWorld.world.createRigidBody(
-      RAPIER.RigidBodyDesc.fixed().setTranslation(-halfSize - this.wallThickness / 2, 15, 0)
-    );
-    const leftWallCollider = RAPIER.ColliderDesc.cuboid(
-      this.wallThickness / 2,
-      15,
-      this.worldSize / 2
-    );
-    leftWallCollider.setRestitution(1.0);
-    this.physicsWorld.world.createCollider(leftWallCollider, leftWallBody);
-
-    // Right Wall
-    const rightWallBody = this.physicsWorld.world.createRigidBody(
-      RAPIER.RigidBodyDesc.fixed().setTranslation(halfSize + this.wallThickness / 2, 15, 0)
-    );
-    const rightWallCollider = RAPIER.ColliderDesc.cuboid(
-      this.wallThickness / 2,
-      15,
-      this.worldSize / 2
-    );
-    rightWallCollider.setRestitution(1.0);
-    this.physicsWorld.world.createCollider(rightWallCollider, rightWallBody);
-
-    // Top Wall
-    const topWallBody = this.physicsWorld.world.createRigidBody(
-      RAPIER.RigidBodyDesc.fixed().setTranslation(0, 30, 0)
-    );
-    const topWallCollider = RAPIER.ColliderDesc.cuboid(
-      (this.worldSize + this.wallThickness * 2) / 2,
-      this.wallThickness / 2,
-      this.worldSize / 2
-    );
-    topWallCollider.setRestitution(1.0);
-    this.physicsWorld.world.createCollider(topWallCollider, topWallBody);
+    // Note: We don't need to create explicit physics bodies for walls
+    // since the SimplePhysics system handles world boundaries automatically
   }
 
   private createUI(): void {

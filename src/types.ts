@@ -1,9 +1,9 @@
 // You can add custom types for your project here
 import * as THREE from 'three';
-import RAPIER from '@dimforge/rapier3d';
+import { SimpleBody } from './fakePhysics';
 
 export interface GameObject {
   mesh: THREE.Mesh;
-  body: RAPIER.RigidBody;
+  body: SimpleBody;
   update?: (delta: number) => void;
 }

@@ -1,12 +1,11 @@
 import * as THREE from 'three';
-import RAPIER from '@dimforge/rapier3d';
-import { PhysicsWorld } from './physics';
+import { SimplePhysics, SimpleBody, createStaticBox } from './fakePhysics';
 import { GameObject } from './types';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 
 export class Alien implements GameObject {
   public mesh: THREE.Mesh;
-  public body: RAPIER.RigidBody;
+  public body: SimpleBody;
   public size: { width: number; height: number; depth: number };
   public isDestroyed: boolean = false;
   public points: number; // Points awarded when destroyed
@@ -21,7 +20,7 @@ export class Alien implements GameObject {
   constructor(
     size: { width: number; height: number; depth: number },
     position: { x: number; y: number; z: number },
-    physicsWorld: PhysicsWorld,
+    physicsWorld: SimplePhysics,
     type: 'small' | 'medium' | 'large' = 'medium'
   ) {
     this.size = size;
@@ -77,20 +76,11 @@ export class Alien implements GameObject {
     this.mesh.receiveShadow = true;
     this.mesh.position.set(position.x, position.y, position.z);
 
-    // Create rigid body
-    const bodyDesc = RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(
-      position.x,
-      position.y,
-      position.z
-    );
+    // Create physics body with simplified physics
+    this.body = createStaticBox(size, position);
 
-    this.body = physicsWorld.world.createRigidBody(bodyDesc);
-
-    // Create collider - using a sphere for better collision detection
-    const colliderDesc = RAPIER.ColliderDesc.ball(size.width / 2);
-    colliderDesc.setRestitution(1.0);
-
-    physicsWorld.world.createCollider(colliderDesc, this.body);
+    // Add to physics world
+    physicsWorld.addBody(this);
 
     // Create animation mixer if needed
     this.animationMixer = new THREE.AnimationMixer(this.mesh);
