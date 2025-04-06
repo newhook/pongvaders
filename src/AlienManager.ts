@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Alien } from './Alien';
 import { GameObject } from './types';
 import { PlayState } from './playState';
+import { Ball } from './Ball';
 
 // Direction of alien swarm movement
 type SwarmDirection = 'left' | 'right';
@@ -206,8 +207,10 @@ export class AlienManager implements GameObject {
   }
 
   // Check if ball has hit any aliens
-  checkCollisions(ballPosition: THREE.Vector3, ballRadius: number): number {
+  checkCollisions(ball: Ball): number {
     let pointsScored = 0;
+    const ballPosition = ball.position;
+    const ballRadius = ball.size.radius;
 
     this.aliens.forEach((alien) => {
       if (!alien.isDestroyed) {
@@ -223,6 +226,27 @@ export class AlienManager implements GameObject {
 
         // If collision detected
         if (distance < ballRadius + alienRadius) {
+          console.log('Collision detected!');
+          // Calculate normal vector (direction from alien to ball)
+          const normal = new THREE.Vector3(
+            ballPosition.x - alienPos.x,
+            ballPosition.y - alienPos.y,
+            ballPosition.z - alienPos.z
+          ).normalize();
+
+          // Calculate dot product for reflection
+          const dot = ball.velocity.dot(normal);
+
+          // Update ball velocity (reflect)
+          ball.velocity.x -= 2 * dot * normal.x;
+          ball.velocity.y -= 2 * dot * normal.y;
+          ball.velocity.z -= 2 * dot * normal.z;
+
+          // Slightly boost the ball speed after hitting an alien
+          const speedBoost = 1.05;
+          ball.velocity.multiplyScalar(speedBoost);
+
+          // Destroy the alien and score points
           alien.destroy();
           pointsScored += alien.points;
 

@@ -33,7 +33,8 @@ export class PlayState implements IGameState {
   private cameraControls: OrbitControls | null = null;
   config: GameConfig;
 
-  private balls: Ball[] = [];
+  // Make balls public so AlienManager can access them
+  public balls: Ball[] = [];
   private paddles: Paddle[] = [];
   private alienManager: AlienManager;
 
@@ -806,7 +807,7 @@ export class PlayState implements IGameState {
       // Check for collisions with aliens
       for (const ball of this.balls) {
         const ballPosition = ball.mesh.position;
-        const points = this.alienManager.checkCollisions(ballPosition, 0.4);
+        const points = this.alienManager.checkCollisions(ball);
 
         // Add points if any were scored
         if (points > 0) {
