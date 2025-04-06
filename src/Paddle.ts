@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GameObject } from './types';
-import { SimplePhysics, createPaddle } from './fakePhysics';
+import { PlayState, SimplePhysicsBody } from './playState';
 
 export class Paddle implements GameObject {
   public mesh: THREE.Mesh;
@@ -17,23 +17,21 @@ export class Paddle implements GameObject {
   private targetPosition: number = 0;
   private isLeftPressed: boolean = false;
   private isRightPressed: boolean = false;
-  private physicsWorld: SimplePhysics;
 
   constructor(
+    game: PlayState,
     size: { width: number; height: number; depth: number },
     position: { x: number; y: number; z: number },
-    physicsWorld: SimplePhysics,
     worldSize: number
   ) {
     this.size = size;
-    this.physicsWorld = physicsWorld;
 
     // Create position and velocity vectors
     this.position = new THREE.Vector3(position.x, position.y, position.z);
     this.velocity = new THREE.Vector3(0, 0, 0);
 
     // Create physics body
-    this.body = createPaddle(size, position);
+    this.body = new SimplePhysicsBody(position, false, false, true, size);
 
     // Create paddle geometry - wider than tall
     const geometry = new THREE.BoxGeometry(size.width, size.height, size.depth);
@@ -56,7 +54,7 @@ export class Paddle implements GameObject {
     this.targetPosition = position.x;
 
     // Add to physics system
-    physicsWorld.addBody(this);
+    game.addBody(this);
 
     // Set movement boundaries based on world size
     this.boundaries = {
@@ -154,7 +152,7 @@ export class Paddle implements GameObject {
     this.removeEventListeners();
 
     // Remove from physics system
-    this.physicsWorld.removeBody(this);
+    // this.game.removeBody(this);
 
     if (this.mesh.parent) {
       this.mesh.parent.remove(this.mesh);

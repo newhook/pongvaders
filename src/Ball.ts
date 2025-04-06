@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GameObject } from './types';
-import { SimplePhysics, createBall } from './fakePhysics';
+import { PlayState, SimplePhysicsBody } from './playState';
 
 export class Ball implements GameObject {
   public mesh: THREE.Mesh;
@@ -20,17 +20,15 @@ export class Ball implements GameObject {
   private trailLifetime: number = 0.5; // Trail lifetime in seconds
   private lastTrailTime: number = 0;
   private trailInterval: number = 0.05; // Time between trail particles
-  private physicsWorld: SimplePhysics;
 
   constructor(
+    game: PlayState,
     radius: number,
     position: { x: number; y: number; z: number },
-    physicsWorld: SimplePhysics,
     scene: THREE.Scene
   ) {
     this.radius = radius;
     this.scene = scene;
-    this.physicsWorld = physicsWorld;
     this.size = { radius };
 
     // Create position and velocity vectors
@@ -38,7 +36,7 @@ export class Ball implements GameObject {
     this.velocity = new THREE.Vector3(0, 0, 0);
 
     // Create physics body
-    this.body = createBall(radius, position);
+    this.body = new SimplePhysicsBody(position, false, true, false, { radius });
 
     // Create ball geometry
     const geometry = new THREE.SphereGeometry(radius, 24, 16);
@@ -69,7 +67,7 @@ export class Ball implements GameObject {
     this.applyVelocity(this.initialVelocity);
 
     // Add this ball to physics system
-    physicsWorld.addBody(this, this.onCollision.bind(this));
+    game.addBody(this, this.onCollision.bind(this));
 
     // Add point light to ball for glow effect
     const light = new THREE.PointLight(0x88aaff, 1, 10);

@@ -1,15 +1,16 @@
 import * as THREE from 'three';
 import { Alien } from './Alien';
-import { SimplePhysics } from './fakePhysics';
 import { GameObject } from './types';
+import { PlayState, SimplePhysicsBody } from './playState';
+import { PlatformPath } from 'path';
 
 // Direction of alien swarm movement
 type SwarmDirection = 'left' | 'right';
 
 export class AlienManager implements GameObject {
+  private game: PlayState;
   private aliens: Alien[] = [];
   private scene: THREE.Scene;
-  private physicsWorld: SimplePhysics;
 
   private rows: number = 5;
   private columns: number = 9;
@@ -33,13 +34,13 @@ export class AlienManager implements GameObject {
   private onReachBottom: (() => void) | null = null;
 
   constructor(
+    game: PlayState,
     scene: THREE.Scene,
-    physicsWorld: SimplePhysics,
     worldSize: number,
     bottomBoundary: number = 1.0
   ) {
+    this.game = game;
     this.scene = scene;
-    this.physicsWorld = physicsWorld;
     this.worldBounds = {
       min: -worldSize / 2 + 1.5, // Add margin from edge
       max: worldSize / 2 - 1.5,
@@ -89,7 +90,7 @@ export class AlienManager implements GameObject {
         }
 
         // Create alien
-        const alien = new Alien(size, { x, y, z }, this.physicsWorld, type);
+        const alien = new Alien(this.game, size, { x, y, z }, type);
 
         // Add to scene and aliens array
         this.scene.add(alien.mesh);

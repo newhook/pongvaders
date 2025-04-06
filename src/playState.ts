@@ -7,7 +7,6 @@ import { GameObject } from './types';
 import { Paddle } from './Paddle';
 import { Ball } from './Ball';
 import { AlienManager } from './AlienManager';
-import { SimpleBody, createStaticBox, createBall, createPaddle } from './fakePhysics';
 
 // Simple physics body directly in PlayState
 export class SimplePhysicsBody {
@@ -308,25 +307,6 @@ export class PlayState implements IGameState {
     }
   }
 
-  // Helper functions to create physics bodies
-  createStaticBox(
-    size: { width: number; height: number; depth: number },
-    position: { x: number; y: number; z: number }
-  ): SimplePhysicsBody {
-    return new SimplePhysicsBody(position, true, false, false, size);
-  }
-
-  createBall(radius: number, position: { x: number; y: number; z: number }): SimplePhysicsBody {
-    return new SimplePhysicsBody(position, false, true, false, { radius });
-  }
-
-  createPaddle(
-    size: { width: number; height: number; depth: number },
-    position: { x: number; y: number; z: number }
-  ): SimplePhysicsBody {
-    return new SimplePhysicsBody(position, false, false, true, size);
-  }
-
   // Set up keyboard event listeners
   private setupKeyboardControls(): void {
     this.keydownListener = (event: KeyboardEvent) => {
@@ -353,7 +333,7 @@ export class PlayState implements IGameState {
     // Create paddle at bottom of screen
     const paddleSize = { width: 4, height: 0.5, depth: 1 };
     const paddlePosition = { x: 0, y: this.bottomBoundary, z: 0 };
-    const paddle = new Paddle(paddleSize, paddlePosition, this.physicsWorld, this.config.worldSize);
+    const paddle = new Paddle(this, paddleSize, paddlePosition, this.config.worldSize);
 
     // Add to scene
     this.scene.add(paddle.mesh);
@@ -365,7 +345,7 @@ export class PlayState implements IGameState {
     // Create ball above paddle
     const ballRadius = 0.4;
     const ballPosition = { x: 0, y: this.bottomBoundary + 2, z: 0 };
-    const ball = new Ball(ballRadius, ballPosition, this.physicsWorld, this.scene);
+    const ball = new Ball(this, ballRadius, ballPosition, this.scene);
 
     // Add to scene
     this.scene.add(ball.mesh);
@@ -376,8 +356,8 @@ export class PlayState implements IGameState {
   private createAlienManager(): AlienManager {
     // Create alien manager
     const alienManager = new AlienManager(
+      this,
       this.scene,
-      this.physicsWorld,
       this.config.worldSize,
       this.bottomBoundary + 1 // Bottom boundary for aliens slightly above paddle
     );

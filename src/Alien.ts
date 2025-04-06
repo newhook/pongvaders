@@ -1,11 +1,11 @@
 import * as THREE from 'three';
-import { SimplePhysics, SimpleBody, createStaticBox } from './fakePhysics';
 import { GameObject } from './types';
+import { PlayState, SimplePhysicsBody } from './playState';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 
 export class Alien implements GameObject {
   public mesh: THREE.Mesh;
-  public body: SimpleBody;
+  public body: SimplePhysicsBody;
   public size: { width: number; height: number; depth: number };
   public isDestroyed: boolean = false;
   public points: number; // Points awarded when destroyed
@@ -18,9 +18,9 @@ export class Alien implements GameObject {
   private initialY: number = 0; // Initial Y position
 
   constructor(
+    game: PlayState,
     size: { width: number; height: number; depth: number },
     position: { x: number; y: number; z: number },
-    physicsWorld: SimplePhysics,
     type: 'small' | 'medium' | 'large' = 'medium'
   ) {
     this.size = size;
@@ -77,10 +77,8 @@ export class Alien implements GameObject {
     this.mesh.position.set(position.x, position.y, position.z);
 
     // Create physics body with simplified physics
-    this.body = createStaticBox(size, position);
-
-    // Add to physics world
-    physicsWorld.addBody(this);
+    this.body = new SimplePhysicsBody(position, true, false, false, size);
+    game.addBody(this);
 
     // Create animation mixer if needed
     this.animationMixer = new THREE.AnimationMixer(this.mesh);
