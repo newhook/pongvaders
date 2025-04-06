@@ -1,28 +1,42 @@
 import * as THREE from 'three';
-import RAPIER from '@dimforge/rapier3d';
 import { IGameState } from './gameStates';
 import { GameStateManager } from './gameStateManager';
 import { GameConfig, defaultConfig } from './config';
-import { PhysicsWorld } from './physics';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GameObject } from './types';
-import { GameManager } from './GameManager';
+import { Paddle } from './Paddle';
+import { Ball } from './Ball';
+import { AlienManager } from './AlienManager';
+
+// Game states
+enum GameState {
+  READY, // Initial state, waiting for player to start
+  PLAYING, // Game in progress
+  GAME_OVER, // Player lost
+  LEVEL_COMPLETE, // Player cleared a level
+  PAUSED, // Game paused
+}
 
 export class PlayState implements IGameState {
   public gameStateManager: GameStateManager;
   scene: THREE.Scene;
-  physicsWorld: PhysicsWorld;
+  worldBounds: {
+    minX: number;
+    maxX: number;
+    minY: number;
+    maxY: number;
+    minZ: number;
+    maxZ: number;
+  };
+
   private camera: THREE.PerspectiveCamera;
   private cameraControls: OrbitControls | null = null;
   config: GameConfig;
 
-  gameObjects: GameObject[] = [];
-
-  // Game manager to handle Pong Invaders gameplay
-  private gameManager: GameManager;
-
-  private physicsDebugRenderer: THREE.LineSegments | null = null;
-  private physicsCounterElement: HTMLElement | null;
+  // Make balls public so AlienManager can access them
+  public balls: Ball[] = [];
+  private paddles: Paddle[] = [];
+  private alienManager: AlienManager;
 
   // Wireframe mode state
   private isWireframeMode: boolean = false;
@@ -30,11 +44,29 @@ export class PlayState implements IGameState {
   // Keyboard event listener for wireframe toggle
   private keydownListener: (event: KeyboardEvent) => void;
 
+  // Game state
+  private state: GameState = GameState.READY;
+  private score: number = 0;
+  private lives: number = 3;
+  private level: number = 1;
+
+  // UI elements
+  private scoreElement: HTMLElement | null = null;
+  private livesElement: HTMLElement | null = null;
+  private levelElement: HTMLElement | null = null;
+  private messageElement: HTMLElement | null = null;
+
+  // Boundaries
+  private bottomBoundary: number = 0.5;
+  private wallThickness: number = 1.0;
+
+  // Ball lost tracking
+  private ballLostTimeout: number | null = null;
+
   constructor(gameStateManager: GameStateManager) {
     // Create scene
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x000022); // Deep space blue
-    this.physicsCounterElement = document.getElementById('physics-counter');
 
     // Setup game state with configuration
     this.config = {
@@ -42,7 +74,17 @@ export class PlayState implements IGameState {
     };
 
     this.gameStateManager = gameStateManager;
-    this.physicsWorld = new PhysicsWorld(this.config);
+
+    // Set up world bounds based on config
+    const halfSize = this.config.worldSize / 2;
+    this.worldBounds = {
+      minX: -halfSize,
+      maxX: halfSize,
+      minY: 0, // Bottom at y=0
+      maxY: 30, // Top at y=30 (from createWalls in GameManager)
+      minZ: -halfSize,
+      maxZ: halfSize,
+    };
 
     // Set up camera with increased far plane
     this.camera = new THREE.PerspectiveCamera(
@@ -74,13 +116,8 @@ export class PlayState implements IGameState {
     // Add lighting for the game scene
     this.setupLighting();
 
-    // Create keyboard event listener for wireframe toggle
-    this.keydownListener = (event: KeyboardEvent) => {
-      if (event.key === 'f' || event.key === 'F') {
-        this.isWireframeMode = !this.isWireframeMode;
-        this.toggleWireframeMode(this.scene, this.isWireframeMode);
-      }
-    };
+    // Create keyboard event listener for wireframe toggle and game controls
+    this.setupKeyboardControls();
 
     // Create surface mesh
     this.createSurfaceMesh();
@@ -88,9 +125,247 @@ export class PlayState implements IGameState {
     // Create orientation guide
     this.createOrientationGuide(this.scene);
 
-    // Initialize game manager with all game elements
-    this.gameManager = new GameManager(this.scene, this.physicsWorld, this.config.worldSize);
-    this.gameObjects.push(this.gameManager);
+    // Create walls
+    this.createWalls();
+
+    // Create UI elements
+    this.createUI();
+
+    // Initialize game elements
+    this.paddles.push(this.createPaddle());
+    this.balls.push(this.createBall());
+    this.alienManager = this.createAlienManager();
+    this.alienManager.setOnReachBottomCallback(() => {
+      if (this.state === GameState.PLAYING) {
+        this.gameOver();
+      }
+    });
+  }
+
+  getPhysicsObjectCount(): number {
+    return this.balls.length + this.paddles.length;
+  }
+
+  // Simple collision detection integrated into PlayState
+  private ballVsBox(
+    ballPos: THREE.Vector3,
+    ballRadius: number,
+    boxPos: THREE.Vector3,
+    boxSize: { width: number; height: number; depth: number }
+  ): boolean {
+    // Find the closest point on the box to the ball
+    const closest = new THREE.Vector3(
+      Math.max(boxPos.x - boxSize.width / 2, Math.min(ballPos.x, boxPos.x + boxSize.width / 2)),
+      Math.max(boxPos.y - boxSize.height / 2, Math.min(ballPos.y, boxPos.y + boxSize.height / 2)),
+      Math.max(boxPos.z - boxSize.depth / 2, Math.min(ballPos.z, boxPos.z + boxSize.depth / 2))
+    );
+
+    // Calculate distance from closest point to ball center
+    const distance = ballPos.distanceTo(closest);
+
+    // If distance is less than ball radius, there's a collision
+    return distance < ballRadius;
+  }
+
+  private ballVsBall(
+    pos1: THREE.Vector3,
+    radius1: number,
+    pos2: THREE.Vector3,
+    radius2: number
+  ): boolean {
+    const distance = pos1.distanceTo(pos2);
+    return distance < radius1 + radius2;
+  }
+
+  // Simple collision resolution for ball vs box
+  private resolveBallBoxCollision(
+    ball: GameObject,
+    boxPos: THREE.Vector3,
+    boxSize: { width: number; height: number; depth: number }
+  ): void {
+    // We know the ball is colliding with the box
+    // Find the closest point on the box to the ball
+    const ballPos = ball.position;
+    const ballRadius = (ball.size as { radius: number }).radius;
+
+    const closest = new THREE.Vector3(
+      Math.max(boxPos.x - boxSize.width / 2, Math.min(ballPos.x, boxPos.x + boxSize.width / 2)),
+      Math.max(boxPos.y - boxSize.height / 2, Math.min(ballPos.y, boxPos.y + boxSize.height / 2)),
+      Math.max(boxPos.z - boxSize.depth / 2, Math.min(ballPos.z, boxPos.z + boxSize.depth / 2))
+    );
+
+    // Direction from box to ball
+    const normal = new THREE.Vector3().subVectors(ballPos, closest).normalize();
+
+    // Calculate reflection direction
+    const dot = ball.velocity.dot(normal);
+
+    // Update ball velocity (reflect)
+    ball.velocity.x -= 2 * dot * normal.x;
+    ball.velocity.y -= 2 * dot * normal.y;
+    ball.velocity.z -= 2 * dot * normal.z;
+
+    // Move ball outside the box
+    const penetration = ballRadius - ballPos.distanceTo(closest);
+    if (penetration > 0) {
+      ballPos.x += normal.x * penetration;
+      ballPos.y += normal.y * penetration;
+      ballPos.z += normal.z * penetration;
+    }
+  }
+
+  // Set up keyboard event listeners
+  private setupKeyboardControls(): void {
+    this.keydownListener = (event: KeyboardEvent) => {
+      // Wireframe toggle
+      if (event.key === 'f' || event.key === 'F') {
+        this.isWireframeMode = !this.isWireframeMode;
+        this.toggleWireframeMode(this.scene, this.isWireframeMode);
+      }
+      // Game controls
+      else if (event.key === ' ') {
+        // Space bar
+        if (this.state === GameState.READY || this.state === GameState.LEVEL_COMPLETE) {
+          this.startGame();
+        } else if (this.state === GameState.GAME_OVER) {
+          this.resetGame();
+        }
+      } else if (event.key === 'p' || event.key === 'P') {
+        this.togglePause();
+      }
+    };
+  }
+
+  private createPaddle(): Paddle {
+    // Create paddle at bottom of screen
+    const paddleSize = { width: 4, height: 0.5, depth: 1 };
+    const paddlePosition = { x: 0, y: this.bottomBoundary, z: 0 };
+    const paddle = new Paddle(this, paddleSize, paddlePosition, this.config.worldSize);
+
+    // Add to scene
+    this.scene.add(paddle.mesh);
+
+    return paddle;
+  }
+
+  private createBall(): Ball {
+    // Create ball above paddle
+    const ballRadius = 0.4;
+    const ballPosition = { x: 0, y: this.bottomBoundary + 2, z: 0 };
+    const ball = new Ball(this, ballRadius, ballPosition, this.scene);
+
+    // Add to scene
+    this.scene.add(ball.mesh);
+
+    return ball;
+  }
+
+  private createAlienManager(): AlienManager {
+    // Create alien manager
+    const alienManager = new AlienManager(
+      this,
+      this.scene,
+      this.config.worldSize,
+      this.bottomBoundary + 1 // Bottom boundary for aliens slightly above paddle
+    );
+
+    return alienManager;
+  }
+
+  private createWalls(): void {
+    // Calculate half size for the world
+    const halfSize = this.config.worldSize / 2;
+
+    // Create materials for the walls
+    const wallMaterial = new THREE.MeshStandardMaterial({
+      color: 0x444488,
+      emissive: 0x111133,
+      metalness: 0.3,
+      roughness: 0.7,
+    });
+
+    // Create THREE wall meshes and physics bodies
+
+    // Left Wall
+    const leftWallGeometry = new THREE.BoxGeometry(this.wallThickness, 30, this.config.worldSize);
+    const leftWallMesh = new THREE.Mesh(leftWallGeometry, wallMaterial);
+    leftWallMesh.position.set(-halfSize - this.wallThickness / 2, 15, 0);
+    this.scene.add(leftWallMesh);
+
+    // Right Wall
+    const rightWallGeometry = new THREE.BoxGeometry(this.wallThickness, 30, this.config.worldSize);
+    const rightWallMesh = new THREE.Mesh(rightWallGeometry, wallMaterial);
+    rightWallMesh.position.set(halfSize + this.wallThickness / 2, 15, 0);
+    this.scene.add(rightWallMesh);
+
+    // Top Wall
+    const topWallGeometry = new THREE.BoxGeometry(
+      this.config.worldSize + this.wallThickness * 2,
+      this.wallThickness,
+      this.config.worldSize
+    );
+    const topWallMesh = new THREE.Mesh(topWallGeometry, wallMaterial);
+    topWallMesh.position.set(0, 30, 0);
+    this.scene.add(topWallMesh);
+
+    // Note: We don't need to create explicit physics bodies for walls
+    // since the SimplePhysics system handles world boundaries automatically
+  }
+
+  private createUI(): void {
+    // Create UI container
+    const uiContainer = document.createElement('div');
+    uiContainer.style.position = 'absolute';
+    uiContainer.style.top = '10px';
+    uiContainer.style.left = '10px';
+    uiContainer.style.color = 'white';
+    uiContainer.style.fontFamily = 'monospace';
+    uiContainer.style.fontSize = '18px';
+    uiContainer.style.textShadow = '2px 2px 2px black';
+
+    // Score display
+    this.scoreElement = document.createElement('div');
+    this.scoreElement.id = 'score';
+    this.scoreElement.textContent = `SCORE: ${this.score}`;
+    this.scoreElement.style.marginBottom = '10px';
+    uiContainer.appendChild(this.scoreElement);
+
+    // Lives display
+    this.livesElement = document.createElement('div');
+    this.livesElement.id = 'lives';
+    this.livesElement.textContent = `LIVES: ${this.lives}`;
+    this.livesElement.style.marginBottom = '10px';
+    uiContainer.appendChild(this.livesElement);
+
+    // Level display
+    this.levelElement = document.createElement('div');
+    this.levelElement.id = 'level';
+    this.levelElement.textContent = `LEVEL: ${this.level}`;
+    uiContainer.appendChild(this.levelElement);
+
+    // Message element (for game over, level complete, etc.)
+    this.messageElement = document.createElement('div');
+    this.messageElement.id = 'message';
+    this.messageElement.style.position = 'absolute';
+    this.messageElement.style.top = '50%';
+    this.messageElement.style.left = '50%';
+    this.messageElement.style.transform = 'translate(-50%, -50%)';
+    this.messageElement.style.color = 'white';
+    this.messageElement.style.fontFamily = 'monospace';
+    this.messageElement.style.fontSize = '36px';
+    this.messageElement.style.textShadow = '2px 2px 4px black';
+    this.messageElement.style.padding = '20px';
+    this.messageElement.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+    this.messageElement.style.borderRadius = '10px';
+    this.messageElement.style.textAlign = 'center';
+    this.messageElement.style.display = 'none';
+
+    // Add UI elements to DOM
+    document.body.appendChild(uiContainer);
+    document.body.appendChild(this.messageElement);
+
+    // Show initial message
+    this.showMessage('PONG INVADERS\n\nPress SPACE to Start\n\nUse A/D or Arrow Keys to move');
   }
 
   // Set up lighting for the game scene
@@ -129,6 +404,156 @@ export class PlayState implements IGameState {
     this.scene.add(pointLight2);
   }
 
+  // Game state management methods
+  private startGame(): void {
+    // Hide message
+    this.hideMessage();
+
+    // Set game state to playing
+    this.state = GameState.PLAYING;
+  }
+
+  private togglePause(): void {
+    if (this.state === GameState.PLAYING) {
+      this.state = GameState.PAUSED;
+      this.showMessage('PAUSED\n\nPress P to Resume');
+    } else if (this.state === GameState.PAUSED) {
+      this.state = GameState.PLAYING;
+      this.hideMessage();
+    }
+  }
+
+  private ballLost(ball: Ball): void {
+    // Prevent multiple ball lost events
+    if (this.ballLostTimeout !== null) {
+      return;
+    }
+
+    // Decrement lives
+    this.lives--;
+    this.updateLivesDisplay();
+
+    // Check for game over
+    if (this.lives <= 0) {
+      this.gameOver();
+      return;
+    }
+
+    // Reset ball position
+    const resetPosition = {
+      x: 0,
+      y: this.bottomBoundary + 2,
+      z: 0,
+    };
+    ball.reset(resetPosition);
+
+    // Show message
+    this.showMessage(`BALL LOST\n\nLives: ${this.lives}\n\nContinuing in 2 seconds...`);
+
+    // Pause briefly before continuing
+    this.state = GameState.READY;
+
+    this.ballLostTimeout = window.setTimeout(() => {
+      this.hideMessage();
+      this.state = GameState.PLAYING;
+      this.ballLostTimeout = null;
+    }, 2000);
+  }
+
+  private gameOver(): void {
+    this.state = GameState.GAME_OVER;
+    this.showMessage('GAME OVER\n\nPress SPACE to Restart');
+  }
+
+  private levelComplete(): void {
+    this.state = GameState.LEVEL_COMPLETE;
+
+    // Increment level
+    this.level++;
+    this.updateLevelDisplay();
+
+    // Show message
+    this.showMessage(
+      `LEVEL ${this.level - 1} COMPLETE!\n\nPress SPACE to Start Level ${this.level}`
+    );
+
+    // Reset aliens with increased difficulty
+    this.alienManager.reset();
+    this.alienManager.setDifficulty(this.level);
+  }
+
+  private resetGame(): void {
+    // Reset game state
+    this.score = 0;
+    this.lives = 3;
+    this.level = 1;
+
+    // Update UI
+    this.updateScoreDisplay();
+    this.updateLivesDisplay();
+    this.updateLevelDisplay();
+
+    // Reset game objects
+    const paddlePosition = { x: 0, y: this.bottomBoundary, z: 0 };
+    for (const paddle of this.paddles) {
+      paddle.reset(paddlePosition);
+    }
+
+    const ballPosition = { x: 0, y: this.bottomBoundary + 2, z: 0 };
+    for (const ball of this.balls) {
+      ball.reset(ballPosition);
+    }
+
+    this.alienManager.reset();
+    this.alienManager.setDifficulty(this.level);
+
+    // Clear any additional objects that might have been added
+    this.balls = [this.createBall()];
+    this.paddles = [this.createPaddle()];
+
+    // Set state to ready
+    this.state = GameState.READY;
+
+    // Show start message
+    this.showMessage('PONG INVADERS\n\nPress SPACE to Start\n\nUse A/D or Arrow Keys to move');
+  }
+
+  private addScore(points: number): void {
+    this.score += points;
+    this.updateScoreDisplay();
+  }
+
+  private updateScoreDisplay(): void {
+    if (this.scoreElement) {
+      this.scoreElement.textContent = `SCORE: ${this.score}`;
+    }
+  }
+
+  private updateLivesDisplay(): void {
+    if (this.livesElement) {
+      this.livesElement.textContent = `LIVES: ${this.lives}`;
+    }
+  }
+
+  private updateLevelDisplay(): void {
+    if (this.levelElement) {
+      this.levelElement.textContent = `LEVEL: ${this.level}`;
+    }
+  }
+
+  private showMessage(message: string): void {
+    if (this.messageElement) {
+      this.messageElement.innerHTML = message.replace(/\n/g, '<br>');
+      this.messageElement.style.display = 'block';
+    }
+  }
+
+  private hideMessage(): void {
+    if (this.messageElement) {
+      this.messageElement.style.display = 'none';
+    }
+  }
+
   // Create a surface-level mesh to represent the ground/base
   private createSurfaceMesh(): void {
     // Create a ground plane with dark material
@@ -164,40 +589,8 @@ export class PlayState implements IGameState {
     // Add ground mesh to the scene
     this.scene.add(groundMesh);
 
-    // Create a physics collider for the ground
-    this.createGroundPhysics();
-
     // Add stars to the background
     this.createStarfield();
-  }
-
-  // Create a physics collider for the ground
-  private createGroundPhysics(): void {
-    // Use the same size as the visual ground mesh
-    const groundSize = this.config.worldSize / 2; // Half-size for RAPIER
-
-    // Create a static rigid body for the ground
-    const groundBodyDesc = RAPIER.RigidBodyDesc.fixed();
-    groundBodyDesc.setTranslation(0, 0, 0); // Same position as visual mesh
-
-    const groundBody = this.physicsWorld.world.createRigidBody(groundBodyDesc);
-
-    // Create collider for the ground
-    const groundColliderDesc = RAPIER.ColliderDesc.cuboid(
-      groundSize, // width (half-size)
-      0.5, // height (half-size)
-      groundSize // depth (half-size)
-    );
-
-    // Position collider to match the visual mesh
-    groundColliderDesc.setTranslation(0, -0.25, 0);
-
-    // Set high friction for the ground
-    groundColliderDesc.setFriction(0.8);
-    groundColliderDesc.setRestitution(0.2);
-
-    // Create the collider
-    this.physicsWorld.world.createCollider(groundColliderDesc, groundBody);
   }
 
   // Create a starfield for the background
@@ -402,64 +795,115 @@ export class PlayState implements IGameState {
     }
   }
 
-  // Update physics objects counter
-  updatePhysicsCounter(): void {
-    if (this.physicsCounterElement) {
-      const count = this.physicsWorld.getPhysicsObjectCount();
-      this.physicsCounterElement.textContent = `PHYSICS OBJECTS: ${count}`;
-    }
-  }
-
   update(deltaTime: number): void {
-    this.updatePhysicsCounter();
-    this.physicsWorld.update(deltaTime);
+    // Update physics simulation first
+    this.updatePhysics(deltaTime);
 
-    // Update all game objects
-    this.gameObjects.forEach((obj) => {
-      if (obj.update) {
-        obj.update(deltaTime);
+    // Update paddle and ball
+    this.alienManager.update(deltaTime);
+
+    // Only process gameplay logic when in PLAYING state
+    if (this.state === GameState.PLAYING) {
+      // Check for collisions with aliens
+      for (const ball of this.balls) {
+        const ballPosition = ball.mesh.position;
+        const points = this.alienManager.checkCollisions(ball);
+
+        // Add points if any were scored
+        if (points > 0) {
+          this.addScore(points);
+        }
+
+        // Check if level is complete
+        if (this.alienManager.areAllDestroyed()) {
+          this.levelComplete();
+        }
+
+        // Check if ball is below paddle (lost ball)
+        if (ballPosition.y < this.bottomBoundary - 3) {
+          this.ballLost(ball);
+        }
       }
-    });
+    }
+
+    // Update all other game objects
+    this.balls.forEach((ball) => ball.update(deltaTime));
+    this.paddles.forEach((paddle) => paddle.update(deltaTime));
 
     // Update camera controls if they exist
     if (this.cameraControls) {
       this.cameraControls.update();
     }
+  }
 
-    // Update physics debug rendering if enabled
-    if (this.physicsDebugRenderer) {
-      // Get fresh debug rendering data
-      const buffers = this.physicsWorld.world.debugRender();
+  // Physics update function integrated into PlayState
+  private updatePhysics(deltaTime: number): void {
+    // Update positions based on velocities
+    for (const body of [...this.balls, ...this.paddles]) {
+      // Update position based on velocity
+      body.position.x += body.velocity.x * deltaTime;
+      body.position.y += body.velocity.y * deltaTime;
+      body.position.z += body.velocity.z * deltaTime;
 
-      // Update the geometry with new vertex data
-      const positions = this.physicsDebugRenderer.geometry.getAttribute('position');
-      const colors = this.physicsDebugRenderer.geometry.getAttribute('color');
-
-      // Make sure buffer sizes match
-      if (
-        positions.array.length === buffers.vertices.length &&
-        colors.array.length === buffers.colors.length
-      ) {
-        // Update position and color data
-        positions.array.set(buffers.vertices);
-        positions.needsUpdate = true;
-
-        colors.array.set(buffers.colors);
-        colors.needsUpdate = true;
-      } else {
-        // Buffer sizes changed, create new geometry
-        const vertices = new Float32Array(buffers.vertices);
-        const newColors = new Float32Array(buffers.colors);
-
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-        geometry.setAttribute('color', new THREE.BufferAttribute(newColors, 4));
-
-        // Replace the old geometry
-        this.physicsDebugRenderer.geometry.dispose();
-        this.physicsDebugRenderer.geometry = geometry;
+      // Update mesh position from physics body
+      if (body.mesh) {
+        body.mesh.position.copy(body.position);
       }
     }
+
+    for (const ball of this.balls) {
+      // 1. Ball with paddle collision
+      for (const paddle of this.paddles) {
+        const collision = this.ballVsBox(
+          ball.position,
+          (ball.size as { radius: number }).radius,
+          paddle.position,
+          paddle.size
+        );
+
+        if (collision) {
+          // Resolve collision
+          this.resolveBallBoxCollision(ball, paddle.position, paddle.size);
+
+          // Trigger collision callbacks if needed
+          ball.onCollision(paddle);
+        }
+      }
+
+      // Only handle ball bounds collision
+      const radius = (ball.size as { radius: number }).radius;
+
+      // X bounds
+      if (ball.position.x - radius < this.worldBounds.minX) {
+        ball.position.x = this.worldBounds.minX + radius;
+        ball.velocity.x = -ball.velocity.x; // Bounce
+      } else if (ball.position.x + radius > this.worldBounds.maxX) {
+        ball.position.x = this.worldBounds.maxX - radius;
+        ball.velocity.x = -ball.velocity.x; // Bounce
+      }
+
+      // Y bounds
+      if (ball.position.y - radius < this.worldBounds.minY) {
+        // Ball reached bottom - in a real game this might be "ball lost"
+        ball.position.y = this.worldBounds.minY + radius;
+        ball.velocity.y = -ball.velocity.y; // Bounce
+      } else if (ball.position.y + radius > this.worldBounds.maxY) {
+        ball.position.y = this.worldBounds.maxY - radius;
+        ball.velocity.y = -ball.velocity.y; // Bounce
+      }
+
+      // Z bounds
+      if (ball.position.z - radius < this.worldBounds.minZ) {
+        ball.position.z = this.worldBounds.minZ + radius;
+        ball.velocity.z = -ball.velocity.z; // Bounce
+      } else if (ball.position.z + radius > this.worldBounds.maxZ) {
+        ball.position.z = this.worldBounds.maxZ - radius;
+        ball.velocity.z = -ball.velocity.z; // Bounce
+      }
+    }
+
+    // 2. Ball with aliens is already handled in the alienManager.checkCollisions
+    // which is called in the update method
   }
 
   onEnter(): void {
@@ -470,6 +914,35 @@ export class PlayState implements IGameState {
   onExit(): void {
     // Remove keyboard event listener for wireframe toggle
     document.removeEventListener('keydown', this.keydownListener);
+
+    // Clean up resources
+    this.dispose();
+  }
+
+  // Clean up resources
+  dispose(): void {
+    // Clear timeout if it exists
+    if (this.ballLostTimeout !== null) {
+      clearTimeout(this.ballLostTimeout);
+      this.ballLostTimeout = null;
+    }
+
+    // Clean up game objects
+    for (const paddle of this.paddles) {
+      paddle.removeEventListeners();
+    }
+    for (const ball of this.balls) {
+      ball.dispose();
+    }
+    if (this.alienManager) this.alienManager.dispose();
+
+    // Remove UI elements
+    if (this.scoreElement?.parentNode) {
+      this.scoreElement.parentNode.remove();
+    }
+    if (this.messageElement) {
+      this.messageElement.remove();
+    }
   }
 
   // Creates a small orientation guide that stays in the corner of the screen

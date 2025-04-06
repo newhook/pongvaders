@@ -1,9 +1,11 @@
 // You can add custom types for your project here
 import * as THREE from 'three';
-import RAPIER from '@dimforge/rapier3d';
 
 export interface GameObject {
   mesh: THREE.Mesh;
-  body: RAPIER.RigidBody;
+  position: THREE.Vector3;
+  velocity: THREE.Vector3;
+  size: { width: number; height: number; depth: number } | { radius: number };
   update?: (delta: number) => void;
+  onCollision?: (other: GameObject) => void;
 }

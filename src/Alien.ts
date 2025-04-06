@@ -1,12 +1,13 @@
 import * as THREE from 'three';
-import RAPIER from '@dimforge/rapier3d';
-import { PhysicsWorld } from './physics';
 import { GameObject } from './types';
+import { PlayState } from './playState';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 
 export class Alien implements GameObject {
+  private game: PlayState;
   public mesh: THREE.Mesh;
-  public body: RAPIER.RigidBody;
+  public position: THREE.Vector3;
+  public velocity: THREE.Vector3;
   public size: { width: number; height: number; depth: number };
   public isDestroyed: boolean = false;
   public points: number; // Points awarded when destroyed
@@ -19,14 +20,19 @@ export class Alien implements GameObject {
   private initialY: number = 0; // Initial Y position
 
   constructor(
+    game: PlayState,
     size: { width: number; height: number; depth: number },
     position: { x: number; y: number; z: number },
-    physicsWorld: PhysicsWorld,
     type: 'small' | 'medium' | 'large' = 'medium'
   ) {
+    this.game = game;
     this.size = size;
     this.initialY = position.y;
     this.hoverOffset = Math.random() * Math.PI * 2; // Random start position in hover cycle
+
+    // Initialize position and velocity vectors (formerly in SimplePhysicsBody)
+    this.position = new THREE.Vector3(position.x, position.y, position.z);
+    this.velocity = new THREE.Vector3(0, 0, 0);
 
     // Set points based on alien type
     switch (type) {
@@ -77,27 +83,21 @@ export class Alien implements GameObject {
     this.mesh.receiveShadow = true;
     this.mesh.position.set(position.x, position.y, position.z);
 
-    // Create rigid body
-    const bodyDesc = RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(
-      position.x,
-      position.y,
-      position.z
-    );
-
-    this.body = physicsWorld.world.createRigidBody(bodyDesc);
-
-    // Create collider - using a sphere for better collision detection
-    const colliderDesc = RAPIER.ColliderDesc.ball(size.width / 2);
-    colliderDesc.setRestitution(1.0);
-
-    physicsWorld.world.createCollider(colliderDesc, this.body);
-
     // Create animation mixer if needed
     this.animationMixer = new THREE.AnimationMixer(this.mesh);
     this.setupAnimations();
 
     // Add eyes/details based on alien type
     this.addAlienDetails(type);
+  }
+
+  // SimplePhysicsBody methods merged directly into Alien
+  translation(): { x: number; y: number; z: number } {
+    return { x: this.position.x, y: this.position.y, z: this.position.z };
+  }
+
+  setTranslation(position: { x: number; y: number; z: number }): void {
+    this.position.set(position.x, position.y, position.z);
   }
 
   private getAlienColor(type: 'small' | 'medium' | 'large'): number {
@@ -287,10 +287,10 @@ export class Alien implements GameObject {
     const hoverY = Math.sin(time * this.hoverFrequency + this.hoverOffset) * this.hoverAmplitude;
 
     // Get current position
-    const position = this.body.translation();
+    const position = this.translation();
 
     // Update position with hover effect
-    this.body.setNextKinematicTranslation({
+    this.setTranslation({
       x: position.x,
       y: this.initialY + hoverY,
       z: position.z,
@@ -305,8 +305,8 @@ export class Alien implements GameObject {
     this.initialY -= amount;
 
     // Update position
-    const position = this.body.translation();
-    this.body.setNextKinematicTranslation({
+    const position = this.translation();
+    this.setTranslation({
       x: position.x,
       y: this.initialY,
       z: position.z,
@@ -350,7 +350,7 @@ export class Alien implements GameObject {
   }
 
   private createExplosionEffect(): void {
-    const position = this.body.translation();
+    const position = this.translation();
 
     // Create explosion particles
     const particleCount = 30;

@@ -1,12 +1,14 @@
 import * as THREE from 'three';
-import RAPIER from '@dimforge/rapier3d';
-import { PhysicsWorld } from './physics';
 import { GameObject } from './types';
+import { PlayState } from './playState';
 
 export class Paddle implements GameObject {
+  private game: PlayState;
   public mesh: THREE.Mesh;
-  public body: RAPIER.RigidBody;
+  public position: THREE.Vector3;
+  public velocity: THREE.Vector3;
   public size: { width: number; height: number; depth: number };
+
   private speed: number = 15; // Movement speed
   private boundaries: { min: number; max: number };
   private targetPosition: number = 0;
@@ -14,11 +16,18 @@ export class Paddle implements GameObject {
   private isRightPressed: boolean = false;
 
   constructor(
+    game: PlayState,
     size: { width: number; height: number; depth: number },
     position: { x: number; y: number; z: number },
-    physicsWorld: PhysicsWorld,
     worldSize: number
   ) {
+    this.game = game;
+    this.size = size;
+
+    // Create position and velocity vectors
+    this.position = new THREE.Vector3(position.x, position.y, position.z);
+    this.velocity = new THREE.Vector3(0, 0, 0);
+
     // Create paddle geometry - wider than tall
     const geometry = new THREE.BoxGeometry(size.width, size.height, size.depth);
 
@@ -35,34 +44,9 @@ export class Paddle implements GameObject {
     this.mesh = new THREE.Mesh(geometry, material);
     this.mesh.castShadow = true;
     this.mesh.receiveShadow = true;
-    this.mesh.position.set(position.x, position.y, position.z);
+    this.mesh.position.copy(this.position);
 
-    // Create rigid body descriptor for paddle
-    const bodyDesc = RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(
-      position.x,
-      position.y,
-      position.z
-    );
-
-    // Create rigid body
-    this.body = physicsWorld.world.createRigidBody(bodyDesc);
-
-    // Create collider for paddle
-    const colliderDesc = RAPIER.ColliderDesc.cuboid(
-      size.width / 2, // half-width
-      size.height / 2, // half-height
-      size.depth / 2 // half-depth
-    );
-
-    // Set physics material properties
-    colliderDesc.setFriction(0.2);
-    colliderDesc.setRestitution(1.2); // Bouncy paddle
-
-    // Create collider
-    physicsWorld.world.createCollider(colliderDesc, this.body);
-
-    // Store size
-    this.size = size;
+    this.targetPosition = position.x;
 
     // Set movement boundaries based on world size
     this.boundaries = {
@@ -89,18 +73,11 @@ export class Paddle implements GameObject {
       Math.min(this.targetPosition, this.boundaries.max)
     );
 
-    // Get current position
-    const position = this.body.translation();
-
     // Set new position
-    this.body.setNextKinematicTranslation({
-      x: this.targetPosition,
-      y: position.y,
-      z: position.z,
-    });
+    this.position.x = this.targetPosition;
 
-    // Update mesh position to match physics body
-    this.mesh.position.set(this.targetPosition, position.y, position.z);
+    // Update mesh position
+    this.mesh.position.copy(this.position);
   }
 
   private setupEventListeners(): void {
@@ -147,9 +124,27 @@ export class Paddle implements GameObject {
   // Reset paddle to starting position
   reset(position: { x: number; y: number; z: number }): void {
     this.targetPosition = position.x;
-    this.body.setTranslation({ x: position.x, y: position.y, z: position.z }, true);
-    this.mesh.position.set(position.x, position.y, position.z);
+    this.position.set(position.x, position.y, position.z);
+    this.mesh.position.copy(this.position);
+
     this.isLeftPressed = false;
     this.isRightPressed = false;
+  }
+
+  // Clean up resources
+  dispose(): void {
+    this.removeEventListeners();
+
+    if (this.mesh.parent) {
+      this.mesh.parent.remove(this.mesh);
+    }
+
+    if (this.mesh.geometry) {
+      this.mesh.geometry.dispose();
+    }
+
+    if (this.mesh.material instanceof THREE.Material) {
+      this.mesh.material.dispose();
+    }
   }
 }

@@ -1,15 +1,23 @@
 import * as THREE from 'three';
 import { Alien } from './Alien';
-import { PhysicsWorld } from './physics';
 import { GameObject } from './types';
+import { PlayState } from './playState';
+import { Ball } from './Ball';
 
 // Direction of alien swarm movement
 type SwarmDirection = 'left' | 'right';
 
 export class AlienManager implements GameObject {
+  private game: PlayState;
   private aliens: Alien[] = [];
   private scene: THREE.Scene;
-  private physicsWorld: PhysicsWorld;
+  public position: THREE.Vector3;
+  public velocity: THREE.Vector3;
+  public isStatic: boolean = true;
+  public isBall: boolean = false;
+  public isPaddle: boolean = false;
+  public size: { width: number; height: number; depth: number } = { width: 0, height: 0, depth: 0 };
+  public mesh: THREE.Mesh; // Required by GameObject interface
 
   private rows: number = 5;
   private columns: number = 9;
@@ -33,18 +41,28 @@ export class AlienManager implements GameObject {
   private onReachBottom: (() => void) | null = null;
 
   constructor(
+    game: PlayState,
     scene: THREE.Scene,
-    physicsWorld: PhysicsWorld,
     worldSize: number,
     bottomBoundary: number = 1.0
   ) {
+    this.game = game;
     this.scene = scene;
-    this.physicsWorld = physicsWorld;
     this.worldBounds = {
       min: -worldSize / 2 + 1.5, // Add margin from edge
       max: worldSize / 2 - 1.5,
     };
     this.bottomBoundary = bottomBoundary;
+
+    // Initialize position and velocity vectors required by GameObject interface
+    this.position = new THREE.Vector3(0, 0, 0);
+    this.velocity = new THREE.Vector3(0, 0, 0);
+
+    // Create an empty mesh for the interface
+    const geometry = new THREE.BufferGeometry();
+    const material = new THREE.MeshBasicMaterial();
+    this.mesh = new THREE.Mesh(geometry, material);
+    this.mesh.visible = false;
 
     // Create initial alien formation
     this.createAlienFormation();
@@ -89,7 +107,7 @@ export class AlienManager implements GameObject {
         }
 
         // Create alien
-        const alien = new Alien(size, { x, y, z }, this.physicsWorld, type);
+        const alien = new Alien(this.game, size, { x, y, z }, type);
 
         // Add to scene and aliens array
         this.scene.add(alien.mesh);
@@ -125,7 +143,7 @@ export class AlienManager implements GameObject {
       let maxX = -Infinity;
       this.aliens.forEach((alien) => {
         if (!alien.isDestroyed) {
-          const position = alien.body.translation();
+          const position = alien.translation();
           if (position.x > maxX) {
             maxX = position.x;
             edgeAlien = alien;
@@ -137,7 +155,7 @@ export class AlienManager implements GameObject {
       let minX = Infinity;
       this.aliens.forEach((alien) => {
         if (!alien.isDestroyed) {
-          const position = alien.body.translation();
+          const position = alien.translation();
           if (position.x < minX) {
             minX = position.x;
             edgeAlien = alien;
@@ -149,7 +167,7 @@ export class AlienManager implements GameObject {
     // Check if swarm needs to change direction
     let shouldMoveDown = false;
     if (edgeAlien) {
-      const position = edgeAlien.body.translation();
+      const position = edgeAlien.translation();
       const alienHalfWidth = edgeAlien.size.width / 2;
 
       if (
@@ -171,10 +189,10 @@ export class AlienManager implements GameObject {
     this.aliens.forEach((alien) => {
       if (!alien.isDestroyed) {
         // Move horizontally
-        const position = alien.body.translation();
+        const position = alien.translation();
         const movement = this.currentDirection === 'right' ? movementDistance : -movementDistance;
 
-        alien.body.setNextKinematicTranslation({
+        alien.setTranslation({
           x: position.x + movement,
           y: position.y,
           z: position.z,
@@ -189,23 +207,43 @@ export class AlienManager implements GameObject {
   }
 
   // Check if ball has hit any aliens
-  checkCollisions(ballPosition: THREE.Vector3, ballRadius: number): number {
+  checkCollisions(ball: Ball): number {
     let pointsScored = 0;
+    const ballPosition = ball.position;
+    const ballRadius = ball.size.radius;
 
     this.aliens.forEach((alien) => {
       if (!alien.isDestroyed) {
-        const alienPos = alien.body.translation();
+        const alienPos = alien.translation();
         const alienRadius = alien.size.width / 2;
 
-        // Calculate distance between ball and alien
+        // Calculate distance between ball and alien (ignoring z coordinate for 2D collision)
         const distance = Math.sqrt(
-          Math.pow(ballPosition.x - alienPos.x, 2) +
-            Math.pow(ballPosition.y - alienPos.y, 2) +
-            Math.pow(ballPosition.z - alienPos.z, 2)
+          Math.pow(ballPosition.x - alienPos.x, 2) + Math.pow(ballPosition.y - alienPos.y, 2)
         );
 
         // If collision detected
         if (distance < ballRadius + alienRadius) {
+          // Calculate normal vector (direction from alien to ball)
+          const normal = new THREE.Vector3(
+            ballPosition.x - alienPos.x,
+            ballPosition.y - alienPos.y,
+            0 // Set z component to 0 to keep bounce reflections in the xy plane
+          ).normalize();
+
+          // Calculate dot product for reflection
+          const dot = ball.velocity.dot(normal);
+
+          // Update ball velocity (reflect)
+          ball.velocity.x -= 2 * dot * normal.x;
+          ball.velocity.y -= 2 * dot * normal.y;
+          ball.velocity.z -= 2 * dot * normal.z;
+
+          // Slightly boost the ball speed after hitting an alien
+          const speedBoost = 1.05;
+          ball.velocity.multiplyScalar(speedBoost);
+
+          // Destroy the alien and score points
           alien.destroy();
           pointsScored += alien.points;
 

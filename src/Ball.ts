@@ -1,11 +1,14 @@
 import * as THREE from 'three';
-import RAPIER from '@dimforge/rapier3d';
-import { PhysicsWorld } from './physics';
 import { GameObject } from './types';
+import { PlayState } from './playState';
 
 export class Ball implements GameObject {
+  private game: PlayState;
   public mesh: THREE.Mesh;
-  public body: RAPIER.RigidBody;
+  public position: THREE.Vector3;
+  public velocity: THREE.Vector3;
+  public size: { radius: number };
+
   private radius: number;
   private initialVelocity: { x: number; y: number; z: number };
   private maxSpeed: number = 20;
@@ -16,13 +19,19 @@ export class Ball implements GameObject {
   private trailInterval: number = 0.05; // Time between trail particles
 
   constructor(
+    game: PlayState,
     radius: number,
     position: { x: number; y: number; z: number },
-    physicsWorld: PhysicsWorld,
     scene: THREE.Scene
   ) {
+    this.game = game;
     this.radius = radius;
     this.scene = scene;
+    this.size = { radius };
+
+    // Create position and velocity vectors
+    this.position = new THREE.Vector3(position.x, position.y, position.z);
+    this.velocity = new THREE.Vector3(0, 0, 0);
 
     // Create ball geometry
     const geometry = new THREE.SphereGeometry(radius, 24, 16);
@@ -40,23 +49,7 @@ export class Ball implements GameObject {
     this.mesh = new THREE.Mesh(geometry, material);
     this.mesh.castShadow = true;
     this.mesh.receiveShadow = true;
-    this.mesh.position.set(position.x, position.y, position.z);
-
-    // Create rigid body
-    const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
-      .setTranslation(position.x, position.y, position.z)
-      .setLinearDamping(0) // No damping to keep ball moving
-      .setAngularDamping(0.5); // Some angular damping
-
-    this.body = physicsWorld.world.createRigidBody(bodyDesc);
-
-    // Create collider
-    const colliderDesc = RAPIER.ColliderDesc.ball(radius);
-    colliderDesc.setRestitution(1.0); // Perfect bounce
-    colliderDesc.setFriction(0.0); // No friction for smooth movement
-    colliderDesc.setDensity(1.0); // Standard density
-
-    physicsWorld.world.createCollider(colliderDesc, this.body);
+    this.mesh.position.copy(this.position);
 
     // Save initial velocity for resets
     this.initialVelocity = {
@@ -87,13 +80,8 @@ export class Ball implements GameObject {
   }
 
   update(deltaTime: number): void {
-    // Update mesh position from physics body
-    const position = this.body.translation();
-    this.mesh.position.set(position.x, position.y, position.z);
-
-    // Update mesh rotation from physics body
-    const rotation = this.body.rotation();
-    this.mesh.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+    // Update mesh position
+    this.mesh.position.copy(this.position);
 
     // Create trail effect
     this.updateTrail(deltaTime);
@@ -103,6 +91,12 @@ export class Ball implements GameObject {
 
     // Ensure ball has some Y velocity to prevent horizontal stalemates
     this.preventHorizontalStalemate();
+  }
+
+  // Handle collision with other objects
+  onCollision(other: GameObject): void {
+    // Can handle special collision effects here
+    // The physics system handles the actual collision resolution
   }
 
   private updateTrail(deltaTime: number): void {
@@ -143,15 +137,12 @@ export class Ball implements GameObject {
   private addTrailParticle(): void {
     if (!this.scene) return;
 
-    // Get current position
-    const position = this.body.translation();
-
     // Create particle geometry
     const geometry = new THREE.BufferGeometry();
     const posArray = new Float32Array(3);
-    posArray[0] = position.x;
-    posArray[1] = position.y;
-    posArray[2] = position.z;
+    posArray[0] = this.position.x;
+    posArray[1] = this.position.y;
+    posArray[2] = this.position.z;
 
     geometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
 
@@ -174,52 +165,40 @@ export class Ball implements GameObject {
   }
 
   private enforceMaxSpeed(): void {
-    const velocity = this.body.linvel();
     const speed = Math.sqrt(
-      velocity.x * velocity.x + velocity.y * velocity.y + velocity.z * velocity.z
+      this.velocity.x * this.velocity.x +
+        this.velocity.y * this.velocity.y +
+        this.velocity.z * this.velocity.z
     );
 
     if (speed > this.maxSpeed) {
       // Scale down velocity to max speed
       const scale = this.maxSpeed / speed;
-      this.body.setLinvel(
-        {
-          x: velocity.x * scale,
-          y: velocity.y * scale,
-          z: velocity.z * scale,
-        },
-        true
-      );
+      this.velocity.x *= scale;
+      this.velocity.y *= scale;
+      this.velocity.z *= scale;
     }
   }
 
   private preventHorizontalStalemate(): void {
-    const velocity = this.body.linvel();
     const minYSpeed = 2.0; // Minimum y-speed to maintain
 
     // If y velocity is too small, add some
-    if (Math.abs(velocity.y) < minYSpeed) {
-      const newYVel = velocity.y < 0 ? -minYSpeed : minYSpeed;
-      this.body.setLinvel(
-        {
-          x: velocity.x,
-          y: newYVel,
-          z: velocity.z,
-        },
-        true
-      );
+    if (Math.abs(this.velocity.y) < minYSpeed) {
+      this.velocity.y = this.velocity.y < 0 ? -minYSpeed : minYSpeed;
     }
   }
 
-  // Apply initial velocity to the ball
+  // Apply velocity to the ball
   applyVelocity(velocity: { x: number; y: number; z: number }): void {
-    this.body.setLinvel(velocity, true);
+    this.velocity.set(velocity.x, velocity.y, velocity.z);
   }
 
   // Reset the ball position and apply a new random velocity
   reset(position: { x: number; y: number; z: number }): void {
     // Reset position
-    this.body.setTranslation(position, true);
+    this.position.set(position.x, position.y, position.z);
+    this.mesh.position.copy(this.position);
 
     // Reset velocity with random x direction
     const resetVelocity = {
