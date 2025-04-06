@@ -1,10 +1,22 @@
 import * as THREE from 'three';
-import { SimplePhysics, SimpleBody, createBall } from './fakePhysics';
 import { GameObject } from './types';
+import {
+  PhysicsSystem,
+  checkBallVsBox,
+  checkBallVsBall,
+  resolveBallBoxCollision,
+  handleBallWorldBoundsCollision,
+} from './physics';
 
 export class Ball implements GameObject {
   public mesh: THREE.Mesh;
-  public body: SimpleBody;
+  public position: THREE.Vector3;
+  public velocity: THREE.Vector3;
+  public isStatic: boolean = false;
+  public isBall: boolean = true;
+  public isPaddle: boolean = false;
+  public size: { radius: number };
+
   private radius: number;
   private initialVelocity: { x: number; y: number; z: number };
   private maxSpeed: number = 20;
@@ -13,15 +25,22 @@ export class Ball implements GameObject {
   private trailLifetime: number = 0.5; // Trail lifetime in seconds
   private lastTrailTime: number = 0;
   private trailInterval: number = 0.05; // Time between trail particles
+  private physicsSystem: PhysicsSystem;
 
   constructor(
     radius: number,
     position: { x: number; y: number; z: number },
-    physicsWorld: SimplePhysics,
+    physicsSystem: PhysicsSystem,
     scene: THREE.Scene
   ) {
     this.radius = radius;
     this.scene = scene;
+    this.physicsSystem = physicsSystem;
+    this.size = { radius };
+
+    // Create position and velocity vectors
+    this.position = new THREE.Vector3(position.x, position.y, position.z);
+    this.velocity = new THREE.Vector3(0, 0, 0);
 
     // Create ball geometry
     const geometry = new THREE.SphereGeometry(radius, 24, 16);
@@ -39,10 +58,7 @@ export class Ball implements GameObject {
     this.mesh = new THREE.Mesh(geometry, material);
     this.mesh.castShadow = true;
     this.mesh.receiveShadow = true;
-    this.mesh.position.set(position.x, position.y, position.z);
-
-    // Create physics body using simple ball creator
-    this.body = createBall(radius, position);
+    this.mesh.position.copy(this.position);
 
     // Save initial velocity for resets
     this.initialVelocity = {
@@ -54,8 +70,8 @@ export class Ball implements GameObject {
     // Apply initial velocity
     this.applyVelocity(this.initialVelocity);
 
-    // Add this ball to physics world
-    physicsWorld.addBody(this);
+    // Add this ball to physics system
+    physicsSystem.addObject(this);
 
     // Add point light to ball for glow effect
     const light = new THREE.PointLight(0x88aaff, 1, 10);
@@ -76,13 +92,13 @@ export class Ball implements GameObject {
   }
 
   update(deltaTime: number): void {
-    // Update mesh position from physics body
-    const position = this.body.translation();
-    this.mesh.position.set(position.x, position.y, position.z);
+    // Update position based on velocity
+    this.position.x += this.velocity.x * deltaTime;
+    this.position.y += this.velocity.y * deltaTime;
+    this.position.z += this.velocity.z * deltaTime;
 
-    // Update mesh rotation from physics body
-    const rotation = this.body.rotation();
-    this.mesh.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+    // Update mesh position
+    this.mesh.position.copy(this.position);
 
     // Create trail effect
     this.updateTrail(deltaTime);
@@ -92,6 +108,45 @@ export class Ball implements GameObject {
 
     // Ensure ball has some Y velocity to prevent horizontal stalemates
     this.preventHorizontalStalemate();
+
+    // Handle world boundaries
+    const worldBounds = this.physicsSystem.getWorldBounds();
+    handleBallWorldBoundsCollision(this.position, this.velocity, this.radius, worldBounds);
+  }
+
+  // Collision detection with other game objects
+  checkCollision(other: GameObject): boolean {
+    if (other.isBall) {
+      // Ball vs Ball collision
+      return checkBallVsBall(
+        this.position,
+        this.radius,
+        other.position,
+        (other.size as { radius: number }).radius
+      );
+    } else {
+      // Ball vs Box collision
+      return checkBallVsBox(
+        this.position,
+        this.radius,
+        other.position,
+        other.size as { width: number; height: number; depth: number }
+      );
+    }
+  }
+
+  // Resolve collision with other game objects
+  resolveCollision(other: GameObject): void {
+    if (!other.isBall) {
+      // Only handle ball vs box collision here, ball vs ball is more complex
+      resolveBallBoxCollision(
+        this.position,
+        this.velocity,
+        this.radius,
+        other.position,
+        other.size as { width: number; height: number; depth: number }
+      );
+    }
   }
 
   private updateTrail(deltaTime: number): void {
@@ -132,15 +187,12 @@ export class Ball implements GameObject {
   private addTrailParticle(): void {
     if (!this.scene) return;
 
-    // Get current position
-    const position = this.body.translation();
-
     // Create particle geometry
     const geometry = new THREE.BufferGeometry();
     const posArray = new Float32Array(3);
-    posArray[0] = position.x;
-    posArray[1] = position.y;
-    posArray[2] = position.z;
+    posArray[0] = this.position.x;
+    posArray[1] = this.position.y;
+    posArray[2] = this.position.z;
 
     geometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
 
@@ -163,52 +215,40 @@ export class Ball implements GameObject {
   }
 
   private enforceMaxSpeed(): void {
-    const velocity = this.body.linvel();
     const speed = Math.sqrt(
-      velocity.x * velocity.x + velocity.y * velocity.y + velocity.z * velocity.z
+      this.velocity.x * this.velocity.x +
+        this.velocity.y * this.velocity.y +
+        this.velocity.z * this.velocity.z
     );
 
     if (speed > this.maxSpeed) {
       // Scale down velocity to max speed
       const scale = this.maxSpeed / speed;
-      this.body.setLinvel(
-        {
-          x: velocity.x * scale,
-          y: velocity.y * scale,
-          z: velocity.z * scale,
-        },
-        true
-      );
+      this.velocity.x *= scale;
+      this.velocity.y *= scale;
+      this.velocity.z *= scale;
     }
   }
 
   private preventHorizontalStalemate(): void {
-    const velocity = this.body.linvel();
     const minYSpeed = 2.0; // Minimum y-speed to maintain
 
     // If y velocity is too small, add some
-    if (Math.abs(velocity.y) < minYSpeed) {
-      const newYVel = velocity.y < 0 ? -minYSpeed : minYSpeed;
-      this.body.setLinvel(
-        {
-          x: velocity.x,
-          y: newYVel,
-          z: velocity.z,
-        },
-        true
-      );
+    if (Math.abs(this.velocity.y) < minYSpeed) {
+      this.velocity.y = this.velocity.y < 0 ? -minYSpeed : minYSpeed;
     }
   }
 
-  // Apply initial velocity to the ball
+  // Apply velocity to the ball
   applyVelocity(velocity: { x: number; y: number; z: number }): void {
-    this.body.setLinvel(velocity, true);
+    this.velocity.set(velocity.x, velocity.y, velocity.z);
   }
 
   // Reset the ball position and apply a new random velocity
   reset(position: { x: number; y: number; z: number }): void {
     // Reset position
-    this.body.setTranslation(position, true);
+    this.position.set(position.x, position.y, position.z);
+    this.mesh.position.copy(this.position);
 
     // Reset velocity with random x direction
     const resetVelocity = {
@@ -247,6 +287,9 @@ export class Ball implements GameObject {
     }
 
     this.clearTrail();
+
+    // Remove from physics system
+    this.physicsSystem.removeObject(this);
 
     if (this.mesh.geometry) {
       this.mesh.geometry.dispose();

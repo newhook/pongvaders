@@ -1,184 +1,210 @@
+import * as THREE from 'three';
 import { GameObject } from './types';
-import RAPIER from '@dimforge/rapier3d';
 import { GameConfig } from './config';
 
-const FIXED_TIMESTEP = 1 / 30;
+// Collision detection functions
+export function checkBallVsBox(
+  ballPos: THREE.Vector3,
+  ballRadius: number,
+  boxPos: THREE.Vector3,
+  boxSize: { width: number; height: number; depth: number }
+): boolean {
+  // Find the closest point on the box to the ball
+  const closest = new THREE.Vector3(
+    Math.max(boxPos.x - boxSize.width / 2, Math.min(ballPos.x, boxPos.x + boxSize.width / 2)),
+    Math.max(boxPos.y - boxSize.height / 2, Math.min(ballPos.y, boxPos.y + boxSize.height / 2)),
+    Math.max(boxPos.z - boxSize.depth / 2, Math.min(ballPos.z, boxPos.z + boxSize.depth / 2))
+  );
 
-export class PhysicsWorld {
-  world: RAPIER.World;
-  bodies: GameObject[];
-  // Add collision event handler
-  eventQueue: RAPIER.EventQueue;
-  collisionHandlers: Map<number, (other: GameObject) => void>;
+  // Calculate distance from closest point to ball center
+  const distance = ballPos.distanceTo(closest);
 
-  accumulatedTime: number = 0;
+  // If distance is less than ball radius, there's a collision
+  return distance < ballRadius;
+}
 
-  constructor(config: GameConfig) {
-    // Create a physics world
-    const gravity = { x: 0.0, y: -9.81, z: 0.0 };
-    this.world = new RAPIER.World(gravity);
-    this.world.timestep = FIXED_TIMESTEP;
-    this.bodies = [];
+export function checkBallVsBall(
+  pos1: THREE.Vector3,
+  radius1: number,
+  pos2: THREE.Vector3,
+  radius2: number
+): boolean {
+  const distance = pos1.distanceTo(pos2);
+  return distance < radius1 + radius2;
+}
 
-    // Initialize collision handling with explicit enablement of contact collection
-    this.eventQueue = new RAPIER.EventQueue(true);
-    this.collisionHandlers = new Map();
+// Collision resolution for ball vs box
+export function resolveBallBoxCollision(
+  ballPos: THREE.Vector3,
+  ballVelocity: THREE.Vector3,
+  ballRadius: number,
+  boxPos: THREE.Vector3,
+  boxSize: { width: number; height: number; depth: number }
+): void {
+  // Find the closest point on the box to the ball
+  const closest = new THREE.Vector3(
+    Math.max(boxPos.x - boxSize.width / 2, Math.min(ballPos.x, boxPos.x + boxSize.width / 2)),
+    Math.max(boxPos.y - boxSize.height / 2, Math.min(ballPos.y, boxPos.y + boxSize.height / 2)),
+    Math.max(boxPos.z - boxSize.depth / 2, Math.min(ballPos.z, boxPos.z + boxSize.depth / 2))
+  );
 
-    // Create ground plane with configurable size
-    const groundSize = config.worldSize / 2; // Divide by 2 since the size is total width
-    const groundColliderDesc = RAPIER.ColliderDesc.cuboid(
-      groundSize,
-      0.1,
-      groundSize
-    ).setTranslation(0, -0.1, 0);
+  // Direction from box to ball
+  const normal = new THREE.Vector3().subVectors(ballPos, closest).normalize();
 
-    // Make the ground slightly bouncy
-    groundColliderDesc.setRestitution(0.3);
-    groundColliderDesc.setFriction(0.8);
+  // Calculate reflection direction
+  const dot = ballVelocity.dot(normal);
 
-    this.world.createCollider(groundColliderDesc);
-  }
+  // Update ball velocity (reflect)
+  ballVelocity.x -= 2 * dot * normal.x;
+  ballVelocity.y -= 2 * dot * normal.y;
+  ballVelocity.z -= 2 * dot * normal.z;
 
-  // Get the count of physics objects
-  getPhysicsObjectCount(): number {
-    return this.bodies.length;
-  }
-
-  update(deltaTime: number): void {
-    this.accumulatedTime += deltaTime;
-    // Step physics in fixed intervals
-    while (this.accumulatedTime >= FIXED_TIMESTEP) {
-      this.world.step(this.eventQueue);
-      // save previous frame and next frame's transforms here
-      this.accumulatedTime -= FIXED_TIMESTEP;
-
-      // Process collision events
-      this.processCollisionEvents();
-
-      // Update all physics objects
-      for (let i = 0; i < this.bodies.length; i++) {
-        const body = this.bodies[i];
-        if (body.mesh) {
-          const position = body.body.translation();
-          const rotation = body.body.rotation();
-
-          // Update mesh position and rotation from physics body
-          body.mesh.position.set(position.x, position.y, position.z);
-          body.mesh.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
-        }
-      }
-    }
-  }
-
-  // Process collision events from RAPIER
-  private processCollisionEvents(): void {
-    this.eventQueue.drainCollisionEvents((handle1, handle2, started) => {
-      if (started) {
-        const collider1 = this.world.getCollider(handle1);
-        const collider2 = this.world.getCollider(handle2);
-
-        const parent1 = collider1.parent();
-        const parent2 = collider2.parent();
-
-        if (parent1 && parent2) {
-          const body1Handle = parent1.handle;
-          const body2Handle = parent2.handle;
-
-          // Find the GameObjects associated with these rigid bodies
-          const gameObj1 = this.findGameObjectByHandle(body1Handle);
-          const gameObj2 = this.findGameObjectByHandle(body2Handle);
-
-          // Trigger collision handlers if they exist
-          if (gameObj1 && this.collisionHandlers.has(body1Handle)) {
-            const handler = this.collisionHandlers.get(body1Handle);
-            if (handler && gameObj2) {
-              handler(gameObj2);
-            }
-          }
-          if (gameObj2 && this.collisionHandlers.has(body2Handle)) {
-            const handler = this.collisionHandlers.get(body2Handle);
-            if (handler && gameObj1) {
-              handler(gameObj1);
-            }
-          }
-        }
-      }
-    });
-
-    // Clear the event queue after processing
-    this.eventQueue.clear();
-  }
-
-  // Find a GameObject by its physics body handle
-  private findGameObjectByHandle(handle: number): GameObject | null {
-    for (const body of this.bodies) {
-      if (body.body.handle === handle) {
-        return body;
-      }
-    }
-    return null;
-  }
-
-  // Register a collision handler for a specific body
-  registerCollisionHandler(body: GameObject, handler: (other: GameObject) => void): void {
-    this.collisionHandlers.set(body.body.handle, handler);
-  }
-
-  // Unregister a collision handler
-  unregisterCollisionHandler(body: GameObject): void {
-    this.collisionHandlers.delete(body.body.handle);
-  }
-
-  addBody(body: GameObject): void {
-    this.bodies.push(body);
-  }
-
-  removeBody(body: GameObject): void {
-    const index = this.bodies.indexOf(body);
-    if (index !== -1) {
-      this.bodies.splice(index, 1);
-      this.world.removeRigidBody(body.body);
-      // Remove any collision handlers
-      this.unregisterCollisionHandler(body);
-    }
+  // Move ball outside the box
+  const penetration = ballRadius - ballPos.distanceTo(closest);
+  if (penetration > 0) {
+    ballPos.x += normal.x * penetration;
+    ballPos.y += normal.y * penetration;
+    ballPos.z += normal.z * penetration;
   }
 }
 
-export function createObstacleBody(
-  size: { width: number; height: number; depth: number },
-  position: { x: number; y: number; z: number },
-  world: RAPIER.World,
-  mass: number = 0
-): RAPIER.RigidBody {
-  // Create appropriate rigid body based on mass
-  const rigidBodyDesc = mass === 0 ? RAPIER.RigidBodyDesc.fixed() : RAPIER.RigidBodyDesc.dynamic();
+// Get world boundaries based on config
+export function getWorldBounds(config: GameConfig): {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+  minZ: number;
+  maxZ: number;
+} {
+  const halfSize = config.worldSize / 2;
+  return {
+    minX: -halfSize,
+    maxX: halfSize,
+    minY: 0, // Bottom at y=0
+    maxY: 30, // Top at y=30 (from createWalls in GameManager)
+    minZ: -halfSize,
+    maxZ: halfSize,
+  };
+}
 
-  // Set position
-  rigidBodyDesc.setTranslation(position.x, position.y, position.z);
-
-  const body = world.createRigidBody(rigidBodyDesc);
-
-  // Create collider for this body
-  const colliderDesc = RAPIER.ColliderDesc.cuboid(size.width / 2, size.height / 2, size.depth / 2);
-
-  if (mass > 0) {
-    colliderDesc.setDensity(mass / (size.width * size.height * size.depth));
+// Check and handle world boundary collisions for balls
+export function handleBallWorldBoundsCollision(
+  position: THREE.Vector3,
+  velocity: THREE.Vector3,
+  radius: number,
+  worldBounds: {
+    minX: number;
+    maxX: number;
+    minY: number;
+    maxY: number;
+    minZ: number;
+    maxZ: number;
+  }
+): void {
+  // X bounds
+  if (position.x - radius < worldBounds.minX) {
+    position.x = worldBounds.minX + radius;
+    velocity.x = -velocity.x; // Bounce
+  } else if (position.x + radius > worldBounds.maxX) {
+    position.x = worldBounds.maxX - radius;
+    velocity.x = -velocity.x; // Bounce
   }
 
-  // Increase friction and add bounce for more dynamic collisions
-  colliderDesc.setFriction(0.8);
-  colliderDesc.setRestitution(0.4); // Increased bounciness
+  // Y bounds
+  if (position.y - radius < worldBounds.minY) {
+    position.y = worldBounds.minY + radius;
+    velocity.y = -velocity.y; // Bounce
+  } else if (position.y + radius > worldBounds.maxY) {
+    position.y = worldBounds.maxY - radius;
+    velocity.y = -velocity.y; // Bounce
+  }
 
-  // Ensure all collision types are active
-  colliderDesc.setActiveCollisionTypes(RAPIER.ActiveCollisionTypes.ALL);
+  // Z bounds
+  if (position.z - radius < worldBounds.minZ) {
+    position.z = worldBounds.minZ + radius;
+    velocity.z = -velocity.z; // Bounce
+  } else if (position.z + radius > worldBounds.maxZ) {
+    position.z = worldBounds.maxZ - radius;
+    velocity.z = -velocity.z; // Bounce
+  }
+}
 
-  // CRITICAL: Enable all events to ensure we get collision notifications
-  colliderDesc.setActiveEvents(
-    RAPIER.ActiveEvents.COLLISION_EVENTS | RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS
-  );
+// System for managing and updating all game objects
+export class PhysicsSystem {
+  private objects: GameObject[] = [];
+  private config: GameConfig;
 
-  // Attach collider to body
-  world.createCollider(colliderDesc, body);
+  constructor(config: GameConfig) {
+    this.config = config;
+  }
 
-  return body;
+  addObject(gameObject: GameObject): void {
+    this.objects.push(gameObject);
+  }
+
+  removeObject(gameObject: GameObject): void {
+    const index = this.objects.indexOf(gameObject);
+    if (index !== -1) {
+      this.objects.splice(index, 1);
+    }
+  }
+
+  getObjectCount(): number {
+    return this.objects.length;
+  }
+
+  update(deltaTime: number): void {
+    // Update all objects
+    for (const obj of this.objects) {
+      if (obj.update) {
+        obj.update(deltaTime);
+      }
+    }
+
+    // Check for collisions
+    this.checkCollisions();
+  }
+
+  checkCollisions(): void {
+    // Check for collisions between objects
+    for (let i = 0; i < this.objects.length; i++) {
+      const objA = this.objects[i];
+
+      for (let j = i + 1; j < this.objects.length; j++) {
+        const objB = this.objects[j];
+
+        // Skip static vs static collisions
+        if (objA.isStatic && objB.isStatic) continue;
+
+        // Check if the objects can collide
+        if (objA.checkCollision && objA.checkCollision(objB)) {
+          // Resolve the collision if possible
+          if (objA.resolveCollision) {
+            objA.resolveCollision(objB);
+          }
+
+          // Notify objects of collision
+          if (objA.onCollision) {
+            objA.onCollision(objB);
+          }
+
+          if (objB.onCollision) {
+            objB.onCollision(objA);
+          }
+        }
+      }
+    }
+  }
+
+  getWorldBounds(): {
+    minX: number;
+    maxX: number;
+    minY: number;
+    maxY: number;
+    minZ: number;
+    maxZ: number;
+  } {
+    return getWorldBounds(this.config);
+  }
 }

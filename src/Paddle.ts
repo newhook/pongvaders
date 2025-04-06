@@ -1,23 +1,36 @@
 import * as THREE from 'three';
-import { SimplePhysics, SimpleBody, createPaddle } from './fakePhysics';
 import { GameObject } from './types';
+import { PhysicsSystem } from './physics';
 
 export class Paddle implements GameObject {
   public mesh: THREE.Mesh;
-  public body: SimpleBody;
+  public position: THREE.Vector3;
+  public velocity: THREE.Vector3;
+  public isStatic: boolean = false;
+  public isBall: boolean = false;
+  public isPaddle: boolean = true;
   public size: { width: number; height: number; depth: number };
+
   private speed: number = 15; // Movement speed
   private boundaries: { min: number; max: number };
   private targetPosition: number = 0;
   private isLeftPressed: boolean = false;
   private isRightPressed: boolean = false;
+  private physicsSystem: PhysicsSystem;
 
   constructor(
     size: { width: number; height: number; depth: number },
     position: { x: number; y: number; z: number },
-    physicsWorld: SimplePhysics,
+    physicsSystem: PhysicsSystem,
     worldSize: number
   ) {
+    this.size = size;
+    this.physicsSystem = physicsSystem;
+
+    // Create position and velocity vectors
+    this.position = new THREE.Vector3(position.x, position.y, position.z);
+    this.velocity = new THREE.Vector3(0, 0, 0);
+
     // Create paddle geometry - wider than tall
     const geometry = new THREE.BoxGeometry(size.width, size.height, size.depth);
 
@@ -34,17 +47,12 @@ export class Paddle implements GameObject {
     this.mesh = new THREE.Mesh(geometry, material);
     this.mesh.castShadow = true;
     this.mesh.receiveShadow = true;
-    this.mesh.position.set(position.x, position.y, position.z);
+    this.mesh.position.copy(this.position);
 
-    // Create physics body
-    this.body = createPaddle(size, position);
     this.targetPosition = position.x;
 
-    // Add to physics world
-    physicsWorld.addBody(this);
-
-    // Store size
-    this.size = size;
+    // Add to physics system
+    physicsSystem.addObject(this);
 
     // Set movement boundaries based on world size
     this.boundaries = {
@@ -71,18 +79,17 @@ export class Paddle implements GameObject {
       Math.min(this.targetPosition, this.boundaries.max)
     );
 
-    // Get current position
-    const position = this.body.translation();
-
     // Set new position
-    this.body.setNextKinematicTranslation({
-      x: this.targetPosition,
-      y: position.y,
-      z: position.z,
-    });
+    this.position.x = this.targetPosition;
 
-    // Update mesh position to match physics body
-    this.mesh.position.set(this.targetPosition, position.y, position.z);
+    // Update mesh position
+    this.mesh.position.copy(this.position);
+  }
+
+  // Collision detection with other game objects
+  checkCollision(other: GameObject): boolean {
+    // We don't need to implement this as the ball handles collisions with the paddle
+    return false;
   }
 
   private setupEventListeners(): void {
@@ -129,9 +136,29 @@ export class Paddle implements GameObject {
   // Reset paddle to starting position
   reset(position: { x: number; y: number; z: number }): void {
     this.targetPosition = position.x;
-    this.body.setTranslation({ x: position.x, y: position.y, z: position.z }, true);
-    this.mesh.position.set(position.x, position.y, position.z);
+    this.position.set(position.x, position.y, position.z);
+    this.mesh.position.copy(this.position);
     this.isLeftPressed = false;
     this.isRightPressed = false;
+  }
+
+  // Clean up resources
+  dispose(): void {
+    this.removeEventListeners();
+
+    // Remove from physics system
+    this.physicsSystem.removeObject(this);
+
+    if (this.mesh.parent) {
+      this.mesh.parent.remove(this.mesh);
+    }
+
+    if (this.mesh.geometry) {
+      this.mesh.geometry.dispose();
+    }
+
+    if (this.mesh.material instanceof THREE.Material) {
+      this.mesh.material.dispose();
+    }
   }
 }

@@ -2,15 +2,15 @@ import * as THREE from 'three';
 import { IGameState } from './gameStates';
 import { GameStateManager } from './gameStateManager';
 import { GameConfig, defaultConfig } from './config';
-import { SimplePhysics, createStaticBox } from './fakePhysics';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
+import { PhysicsWorld } from './fakePhysics';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GameObject } from './types';
 import { GameManager } from './GameManager';
 
 export class PlayState implements IGameState {
   public gameStateManager: GameStateManager;
   scene: THREE.Scene;
-  physicsWorld: SimplePhysics;
+  physicsWorld: PhysicsWorld;
   private camera: THREE.PerspectiveCamera;
   private cameraControls: OrbitControls | null = null;
   config: GameConfig;
@@ -20,6 +20,7 @@ export class PlayState implements IGameState {
   // Game manager to handle Pong Invaders gameplay
   private gameManager: GameManager;
 
+  private physicsDebugRenderer: THREE.LineSegments | null = null;
   private physicsCounterElement: HTMLElement | null;
 
   // Wireframe mode state
@@ -40,7 +41,7 @@ export class PlayState implements IGameState {
     };
 
     this.gameStateManager = gameStateManager;
-    this.physicsWorld = new SimplePhysics(this.config);
+    this.physicsWorld = new PhysicsWorld(this.config);
 
     // Set up camera with increased far plane
     this.camera = new THREE.PerspectiveCamera(
@@ -390,6 +391,41 @@ export class PlayState implements IGameState {
     // Update camera controls if they exist
     if (this.cameraControls) {
       this.cameraControls.update();
+    }
+
+    // Update physics debug rendering if enabled
+    if (this.physicsDebugRenderer) {
+      // Get fresh debug rendering data
+      const buffers = this.physicsWorld.world.debugRender();
+
+      // Update the geometry with new vertex data
+      const positions = this.physicsDebugRenderer.geometry.getAttribute('position');
+      const colors = this.physicsDebugRenderer.geometry.getAttribute('color');
+
+      // Make sure buffer sizes match
+      if (
+        positions.array.length === buffers.vertices.length &&
+        colors.array.length === buffers.colors.length
+      ) {
+        // Update position and color data
+        positions.array.set(buffers.vertices);
+        positions.needsUpdate = true;
+
+        colors.array.set(buffers.colors);
+        colors.needsUpdate = true;
+      } else {
+        // Buffer sizes changed, create new geometry
+        const vertices = new Float32Array(buffers.vertices);
+        const newColors = new Float32Array(buffers.colors);
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(newColors, 4));
+
+        // Replace the old geometry
+        this.physicsDebugRenderer.geometry.dispose();
+        this.physicsDebugRenderer.geometry = geometry;
+      }
     }
   }
 
