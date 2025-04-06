@@ -8,9 +8,6 @@ export class Alien implements GameObject {
   public mesh: THREE.Mesh;
   public position: THREE.Vector3;
   public velocity: THREE.Vector3;
-  public isStatic: boolean = true;
-  public isBall: boolean = false;
-  public isPaddle: boolean = false;
   public size: { width: number; height: number; depth: number };
   public isDestroyed: boolean = false;
   public points: number; // Points awarded when destroyed
@@ -99,32 +96,8 @@ export class Alien implements GameObject {
     return { x: this.position.x, y: this.position.y, z: this.position.z };
   }
 
-  setNextKinematicTranslation(position: { x: number; y: number; z: number }): void {
-    this.position.set(position.x, position.y, position.z);
-  }
-
   setTranslation(position: { x: number; y: number; z: number }): void {
     this.position.set(position.x, position.y, position.z);
-  }
-
-  linvel(): { x: number; y: number; z: number } {
-    return { x: this.velocity.x, y: this.velocity.y, z: this.velocity.z };
-  }
-
-  setLinvel(velocity: { x: number; y: number; z: number }): void {
-    this.velocity.set(velocity.x, velocity.y, velocity.z);
-  }
-
-  applyImpulse(impulse: { x: number; y: number; z: number }): void {
-    if (!this.isStatic) {
-      this.velocity.x += impulse.x;
-      this.velocity.y += impulse.y;
-      this.velocity.z += impulse.z;
-    }
-  }
-
-  rotation(): { x: number; y: number; z: number; w: number } {
-    return { x: 0, y: 0, z: 0, w: 1 };
   }
 
   private getAlienColor(type: 'small' | 'medium' | 'large'): number {
@@ -317,7 +290,7 @@ export class Alien implements GameObject {
     const position = this.translation();
 
     // Update position with hover effect
-    this.setNextKinematicTranslation({
+    this.setTranslation({
       x: position.x,
       y: this.initialY + hoverY,
       z: position.z,
@@ -333,7 +306,7 @@ export class Alien implements GameObject {
 
     // Update position
     const position = this.translation();
-    this.setNextKinematicTranslation({
+    this.setTranslation({
       x: position.x,
       y: this.initialY,
       z: position.z,

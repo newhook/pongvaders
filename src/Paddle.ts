@@ -7,9 +7,6 @@ export class Paddle implements GameObject {
   public mesh: THREE.Mesh;
   public position: THREE.Vector3;
   public velocity: THREE.Vector3;
-  public isStatic: boolean = false;
-  public isBall: boolean = false;
-  public isPaddle: boolean = true;
   public size: { width: number; height: number; depth: number };
 
   private speed: number = 15; // Movement speed
@@ -59,39 +56,6 @@ export class Paddle implements GameObject {
 
     // Set up keyboard event listeners
     this.setupEventListeners();
-  }
-
-  // SimplePhysicsBody methods merged directly into Paddle
-  translation(): { x: number; y: number; z: number } {
-    return { x: this.position.x, y: this.position.y, z: this.position.z };
-  }
-
-  setNextKinematicTranslation(position: { x: number; y: number; z: number }): void {
-    this.position.set(position.x, position.y, position.z);
-  }
-
-  setTranslation(position: { x: number; y: number; z: number }): void {
-    this.position.set(position.x, position.y, position.z);
-  }
-
-  linvel(): { x: number; y: number; z: number } {
-    return { x: this.velocity.x, y: this.velocity.y, z: this.velocity.z };
-  }
-
-  setLinvel(velocity: { x: number; y: number; z: number }): void {
-    this.velocity.set(velocity.x, velocity.y, velocity.z);
-  }
-
-  applyImpulse(impulse: { x: number; y: number; z: number }): void {
-    if (!this.isStatic) {
-      this.velocity.x += impulse.x;
-      this.velocity.y += impulse.y;
-      this.velocity.z += impulse.z;
-    }
-  }
-
-  rotation(): { x: number; y: number; z: number; w: number } {
-    return { x: 0, y: 0, z: 0, w: 1 };
   }
 
   update(deltaTime: number): void {

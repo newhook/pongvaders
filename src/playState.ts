@@ -20,7 +20,6 @@ enum GameState {
 export class PlayState implements IGameState {
   public gameStateManager: GameStateManager;
   scene: THREE.Scene;
-  gravity: number = 0; // No gravity for pong/breakout!
   worldBounds: {
     minX: number;
     maxX: number;
@@ -34,21 +33,15 @@ export class PlayState implements IGameState {
   private cameraControls: OrbitControls | null = null;
   config: GameConfig;
 
-  gameObjects: GameObject[] = [];
-
-  private physicsDebugRenderer: THREE.LineSegments | null = null;
-  private physicsCounterElement: HTMLElement | null;
+  private balls: Ball[] = [];
+  private paddles: Paddle[] = [];
+  private alienManager: AlienManager;
 
   // Wireframe mode state
   private isWireframeMode: boolean = false;
 
   // Keyboard event listener for wireframe toggle
   private keydownListener: (event: KeyboardEvent) => void;
-
-  // Game objects
-  private paddle: Paddle;
-  private ball: Ball;
-  private alienManager: AlienManager;
 
   // Game state
   private state: GameState = GameState.READY;
@@ -73,7 +66,6 @@ export class PlayState implements IGameState {
     // Create scene
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x000022); // Deep space blue
-    this.physicsCounterElement = document.getElementById('physics-counter');
 
     // Setup game state with configuration
     this.config = {
@@ -139,24 +131,18 @@ export class PlayState implements IGameState {
     this.createUI();
 
     // Initialize game elements
-    this.paddle = this.createPaddle();
-    this.ball = this.createBall();
+    this.paddles.push(this.createPaddle());
+    this.balls.push(this.createBall());
     this.alienManager = this.createAlienManager();
-
-    // Set up alien collision callback
     this.alienManager.setOnReachBottomCallback(() => {
       if (this.state === GameState.PLAYING) {
         this.gameOver();
       }
     });
-
-    // Add game objects to the list
-    this.gameObjects.push(this.paddle);
-    this.gameObjects.push(this.ball);
   }
 
   getPhysicsObjectCount(): number {
-    return this.gameObjects.length;
+    return this.balls.length + this.paddles.length;
   }
 
   // Simple collision detection integrated into PlayState
@@ -424,16 +410,6 @@ export class PlayState implements IGameState {
 
     // Set game state to playing
     this.state = GameState.PLAYING;
-
-    // Reset ball if needed
-    if (this.state === GameState.LEVEL_COMPLETE) {
-      const resetPosition = {
-        x: 0,
-        y: this.bottomBoundary + 2,
-        z: 0,
-      };
-      this.ball.reset(resetPosition);
-    }
   }
 
   private togglePause(): void {
@@ -446,7 +422,7 @@ export class PlayState implements IGameState {
     }
   }
 
-  private ballLost(): void {
+  private ballLost(ball: Ball): void {
     // Prevent multiple ball lost events
     if (this.ballLostTimeout !== null) {
       return;
@@ -468,7 +444,7 @@ export class PlayState implements IGameState {
       y: this.bottomBoundary + 2,
       z: 0,
     };
-    this.ball.reset(resetPosition);
+    ball.reset(resetPosition);
 
     // Show message
     this.showMessage(`BALL LOST\n\nLives: ${this.lives}\n\nContinuing in 2 seconds...`);
@@ -518,13 +494,21 @@ export class PlayState implements IGameState {
 
     // Reset game objects
     const paddlePosition = { x: 0, y: this.bottomBoundary, z: 0 };
-    this.paddle.reset(paddlePosition);
+    for (const paddle of this.paddles) {
+      paddle.reset(paddlePosition);
+    }
 
     const ballPosition = { x: 0, y: this.bottomBoundary + 2, z: 0 };
-    this.ball.reset(ballPosition);
+    for (const ball of this.balls) {
+      ball.reset(ballPosition);
+    }
 
     this.alienManager.reset();
     this.alienManager.setDifficulty(this.level);
+
+    // Clear any additional objects that might have been added
+    this.balls = [this.createBall()];
+    this.paddles = [this.createPaddle()];
 
     // Set state to ready
     this.state = GameState.READY;
@@ -810,81 +794,55 @@ export class PlayState implements IGameState {
     }
   }
 
-  // Update physics objects counter
-  updatePhysicsCounter(): void {
-    if (this.physicsCounterElement) {
-      const count = this.getPhysicsObjectCount();
-      this.physicsCounterElement.textContent = `PHYSICS OBJECTS: ${count}`;
-    }
-  }
-
   update(deltaTime: number): void {
     // Update physics simulation first
     this.updatePhysics(deltaTime);
 
-    // Update physics objects counter
-    this.updatePhysicsCounter();
-
     // Update paddle and ball
-    this.paddle.update(deltaTime);
-    this.ball.update(deltaTime);
     this.alienManager.update(deltaTime);
 
     // Only process gameplay logic when in PLAYING state
     if (this.state === GameState.PLAYING) {
       // Check for collisions with aliens
-      const ballPosition = this.ball.mesh.position;
-      const points = this.alienManager.checkCollisions(ballPosition, 0.4);
+      for (const ball of this.balls) {
+        const ballPosition = ball.mesh.position;
+        const points = this.alienManager.checkCollisions(ballPosition, 0.4);
 
-      // Add points if any were scored
-      if (points > 0) {
-        this.addScore(points);
-      }
+        // Add points if any were scored
+        if (points > 0) {
+          this.addScore(points);
+        }
 
-      // Check if level is complete
-      if (this.alienManager.areAllDestroyed()) {
-        this.levelComplete();
-      }
+        // Check if level is complete
+        if (this.alienManager.areAllDestroyed()) {
+          this.levelComplete();
+        }
 
-      // Check if ball is below paddle (lost ball)
-      if (ballPosition.y < this.bottomBoundary - 3) {
-        this.ballLost();
+        // Check if ball is below paddle (lost ball)
+        if (ballPosition.y < this.bottomBoundary - 3) {
+          this.ballLost(ball);
+        }
       }
     }
 
     // Update all other game objects
-    this.gameObjects.forEach((obj) => {
-      if (obj !== this.paddle && obj !== this.ball && obj.update) {
-        obj.update(deltaTime);
-      }
-    });
+    this.balls.forEach((ball) => ball.update(deltaTime));
+    this.paddles.forEach((paddle) => paddle.update(deltaTime));
 
     // Update camera controls if they exist
     if (this.cameraControls) {
       this.cameraControls.update();
-    }
-
-    // Update physics debug rendering if enabled
-    if (this.physicsDebugRenderer) {
-      // Debug rendering code would go here if needed
-      // Since we're directly integrating physics, we may need to
-      // implement our own debug rendering if required
     }
   }
 
   // Physics update function integrated into PlayState
   private updatePhysics(deltaTime: number): void {
     // Update positions based on velocities
-    for (const body of this.gameObjects) {
-      if (!body.isStatic) {
-        // Apply gravity
-        body.velocity.y -= this.gravity * deltaTime;
-
-        // Update position based on velocity
-        body.position.x += body.velocity.x * deltaTime;
-        body.position.y += body.velocity.y * deltaTime;
-        body.position.z += body.velocity.z * deltaTime;
-      }
+    for (const body of [...this.balls, ...this.paddles]) {
+      // Update position based on velocity
+      body.position.x += body.velocity.x * deltaTime;
+      body.position.y += body.velocity.y * deltaTime;
+      body.position.z += body.velocity.z * deltaTime;
 
       // Update mesh position from physics body
       if (body.mesh) {
@@ -892,82 +850,59 @@ export class PlayState implements IGameState {
       }
     }
 
-    // Check for collisions
-    this.checkCollisions();
+    for (const ball of this.balls) {
+      // 1. Ball with paddle collision
+      for (const paddle of this.paddles) {
+        const collision = this.ballVsBox(
+          ball.position,
+          (ball.size as { radius: number }).radius,
+          paddle.position,
+          paddle.size
+        );
 
-    // Keep balls within world bounds
-    this.keepObjectsInBounds();
-  }
+        if (collision) {
+          // Resolve collision
+          this.resolveBallBoxCollision(ball, paddle.position, paddle.size);
 
-  // Check for collisions between objects
-  private checkCollisions(): void {
-    // Ball is the only dynamic object that collides with other objects
-    const ball = this.ball;
+          // Trigger collision callbacks if needed
+          ball.onCollision(paddle);
+        }
+      }
 
-    // Only check collisions if ball exists
-    if (!ball) return;
+      // Only handle ball bounds collision
+      const radius = (ball.size as { radius: number }).radius;
 
-    // 1. Ball with paddle collision
-    if (this.paddle) {
-      const collision = this.ballVsBox(
-        ball.position,
-        (ball.size as { radius: number }).radius,
-        this.paddle.position,
-        this.paddle.size
-      );
+      // X bounds
+      if (ball.position.x - radius < this.worldBounds.minX) {
+        ball.position.x = this.worldBounds.minX + radius;
+        ball.velocity.x = -ball.velocity.x; // Bounce
+      } else if (ball.position.x + radius > this.worldBounds.maxX) {
+        ball.position.x = this.worldBounds.maxX - radius;
+        ball.velocity.x = -ball.velocity.x; // Bounce
+      }
 
-      if (collision) {
-        // Resolve collision
-        this.resolveBallBoxCollision(ball, this.paddle.position, this.paddle.size);
+      // Y bounds
+      if (ball.position.y - radius < this.worldBounds.minY) {
+        // Ball reached bottom - in a real game this might be "ball lost"
+        ball.position.y = this.worldBounds.minY + radius;
+        ball.velocity.y = -ball.velocity.y; // Bounce
+      } else if (ball.position.y + radius > this.worldBounds.maxY) {
+        ball.position.y = this.worldBounds.maxY - radius;
+        ball.velocity.y = -ball.velocity.y; // Bounce
+      }
 
-        // Trigger collision callbacks if needed
-        if (ball.onCollision) ball.onCollision(this.paddle);
-        if (this.paddle.onCollision) this.paddle.onCollision(ball);
+      // Z bounds
+      if (ball.position.z - radius < this.worldBounds.minZ) {
+        ball.position.z = this.worldBounds.minZ + radius;
+        ball.velocity.z = -ball.velocity.z; // Bounce
+      } else if (ball.position.z + radius > this.worldBounds.maxZ) {
+        ball.position.z = this.worldBounds.maxZ - radius;
+        ball.velocity.z = -ball.velocity.z; // Bounce
       }
     }
 
     // 2. Ball with aliens is already handled in the alienManager.checkCollisions
     // which is called in the update method
-
-    // 3. Ball with walls is handled in keepObjectsInBounds method
-  }
-
-  // Keep objects within world bounds
-  private keepObjectsInBounds(): void {
-    for (const body of this.gameObjects) {
-      // Only handle ball bounds collision
-      if (body.isBall) {
-        const radius = (body.size as { radius: number }).radius;
-
-        // X bounds
-        if (body.position.x - radius < this.worldBounds.minX) {
-          body.position.x = this.worldBounds.minX + radius;
-          body.velocity.x = -body.velocity.x; // Bounce
-        } else if (body.position.x + radius > this.worldBounds.maxX) {
-          body.position.x = this.worldBounds.maxX - radius;
-          body.velocity.x = -body.velocity.x; // Bounce
-        }
-
-        // Y bounds
-        if (body.position.y - radius < this.worldBounds.minY) {
-          // Ball reached bottom - in a real game this might be "ball lost"
-          body.position.y = this.worldBounds.minY + radius;
-          body.velocity.y = -body.velocity.y; // Bounce
-        } else if (body.position.y + radius > this.worldBounds.maxY) {
-          body.position.y = this.worldBounds.maxY - radius;
-          body.velocity.y = -body.velocity.y; // Bounce
-        }
-
-        // Z bounds
-        if (body.position.z - radius < this.worldBounds.minZ) {
-          body.position.z = this.worldBounds.minZ + radius;
-          body.velocity.z = -body.velocity.z; // Bounce
-        } else if (body.position.z + radius > this.worldBounds.maxZ) {
-          body.position.z = this.worldBounds.maxZ - radius;
-          body.velocity.z = -body.velocity.z; // Bounce
-        }
-      }
-    }
   }
 
   onEnter(): void {
@@ -992,8 +927,12 @@ export class PlayState implements IGameState {
     }
 
     // Clean up game objects
-    if (this.paddle) this.paddle.removeEventListeners();
-    if (this.ball) this.ball.dispose();
+    for (const paddle of this.paddles) {
+      paddle.removeEventListeners();
+    }
+    for (const ball of this.balls) {
+      ball.dispose();
+    }
     if (this.alienManager) this.alienManager.dispose();
 
     // Remove UI elements

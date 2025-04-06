@@ -191,7 +191,7 @@ export class AlienManager implements GameObject {
         const position = alien.translation();
         const movement = this.currentDirection === 'right' ? movementDistance : -movementDistance;
 
-        alien.setNextKinematicTranslation({
+        alien.setTranslation({
           x: position.x + movement,
           y: position.y,
           z: position.z,
