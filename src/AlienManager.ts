@@ -67,7 +67,7 @@ export class AlienManager {
     // Start position for the grid (centered)
     const startX = -((this.columns - 1) * this.horizontalSpacing) / 2;
     const startY = 15; // Start height
-    const startZ = -5; // Start depth position
+    const startZ = 0; // Start depth position
 
     for (let row = 0; row < this.rows; row++) {
       for (let col = 0; col < this.columns; col++) {
