@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GameObject } from './types';
 import { PlayState } from './playState';
+import { Ball } from './Ball';
 
 export class Paddle implements GameObject {
   private game: PlayState;
@@ -8,6 +9,9 @@ export class Paddle implements GameObject {
   public position: THREE.Vector3;
   public velocity: THREE.Vector3;
   public size: { width: number; height: number; depth: number };
+
+  // Add collision helper for debug visualization
+  public collisionHelper: THREE.Mesh | null = null;
 
   private speed: number = 15; // Movement speed
   private boundaries: { min: number; max: number };
@@ -78,6 +82,22 @@ export class Paddle implements GameObject {
 
     // Update mesh position
     this.mesh.position.copy(this.position);
+
+    // Update any attached ball
+    this.updateAttachedBall();
+  }
+
+  // Move any attached balls with the paddle
+  private updateAttachedBall(): void {
+    // Get all balls from the game
+    const balls = this.game.balls;
+
+    // Update position of any attached balls
+    for (const ball of balls) {
+      if (ball.isAttachedToPaddle) {
+        ball.attachToPaddle(this.position, this.size);
+      }
+    }
   }
 
   private setupEventListeners(): void {
@@ -145,6 +165,36 @@ export class Paddle implements GameObject {
 
     if (this.mesh.material instanceof THREE.Material) {
       this.mesh.material.dispose();
+    }
+  }
+
+  public createCollisionHelper(): void {
+    if (this.collisionHelper) {
+      return;
+    }
+    const helperGeometry = new THREE.BoxGeometry(
+      this.size.width,
+      this.size.height,
+      this.size.depth
+    );
+    const helperMaterial = new THREE.MeshBasicMaterial({
+      color: 0x0000ff,
+      wireframe: true,
+    });
+
+    this.collisionHelper = new THREE.Mesh(helperGeometry, helperMaterial);
+    this.collisionHelper.position.copy(this.position);
+    this.game.scene.add(this.collisionHelper);
+  }
+
+  public removeCollisionHelper(): void {
+    if (this.collisionHelper) {
+      this.game.scene.remove(this.collisionHelper);
+      if (this.collisionHelper.geometry) this.collisionHelper.geometry.dispose();
+      if (this.collisionHelper.material instanceof THREE.Material) {
+        this.collisionHelper.material.dispose();
+      }
+      this.collisionHelper = null;
     }
   }
 }

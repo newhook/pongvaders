@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { IGameState } from './gameStates';
-import { MarqueeState } from './marqueeState';
 import { PlayState } from './playState';
 import { SoundManager } from './soundManager';
 import { PreMarquee } from './preMarquee';
@@ -29,14 +28,6 @@ export class GameStateManager {
       this.currentState.onExit();
     }
     this.currentState = new PlayState(this);
-    this.currentState.onEnter();
-  }
-
-  switchToMarquee(): void {
-    if (this.currentState) {
-      this.currentState.onExit();
-    }
-    this.currentState = new MarqueeState(this);
     this.currentState.onEnter();
   }
 

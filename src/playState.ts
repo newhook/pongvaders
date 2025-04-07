@@ -17,6 +17,9 @@ enum GameState {
   PAUSED, // Game paused
 }
 
+// Add debug flag
+const DEBUG_COLLISION_BOUNDARIES = false; // Set to true to enable collision boundary visualization
+
 export class PlayState implements IGameState {
   public gameStateManager: GameStateManager;
   scene: THREE.Scene;
@@ -28,6 +31,9 @@ export class PlayState implements IGameState {
     minZ: number;
     maxZ: number;
   };
+
+  // Expose debug collision boundaries property that can be accessed by other classes
+  public debugCollisionBoundaries: boolean = DEBUG_COLLISION_BOUNDARIES;
 
   private camera: THREE.PerspectiveCamera;
   private cameraControls: OrbitControls | null = null;
@@ -43,6 +49,8 @@ export class PlayState implements IGameState {
 
   // Keyboard event listener for wireframe toggle
   private keydownListener: (event: KeyboardEvent) => void;
+  // Click event listener for ball release
+  private clickListener: (event: MouseEvent) => void;
 
   // Game state
   private state: GameState = GameState.READY;
@@ -119,11 +127,11 @@ export class PlayState implements IGameState {
     // Create keyboard event listener for wireframe toggle and game controls
     this.setupKeyboardControls();
 
+    // Create click listener for ball release
+    this.setupClickListener();
+
     // Create surface mesh
     this.createSurfaceMesh();
-
-    // Create orientation guide
-    this.createOrientationGuide(this.scene);
 
     // Create walls
     this.createWalls();
@@ -222,6 +230,11 @@ export class PlayState implements IGameState {
         this.isWireframeMode = !this.isWireframeMode;
         this.toggleWireframeMode(this.scene, this.isWireframeMode);
       }
+      // Collision boundary visualization toggle
+      else if (event.key === 'c' || event.key === 'C') {
+        this.debugCollisionBoundaries = !this.debugCollisionBoundaries;
+        this.toggleCollisionBoundaries();
+      }
       // Game controls
       else if (event.key === ' ') {
         // Space bar
@@ -229,11 +242,34 @@ export class PlayState implements IGameState {
           this.startGame();
         } else if (this.state === GameState.GAME_OVER) {
           this.resetGame();
+        } else if (this.state === GameState.PLAYING) {
+          // Release the ball if it's attached to the paddle
+          this.releaseBall();
         }
       } else if (event.key === 'p' || event.key === 'P') {
         this.togglePause();
       }
     };
+  }
+
+  // Set up click event listener for ball release
+  private setupClickListener(): void {
+    this.clickListener = (event: MouseEvent) => {
+      // Only release the ball if we're in PLAYING state
+      if (this.state === GameState.PLAYING) {
+        this.releaseBall();
+      }
+    };
+  }
+
+  // Release the ball from the paddle
+  private releaseBall(): void {
+    for (const ball of this.balls) {
+      if (ball.isAttachedToPaddle) {
+        ball.releaseBall();
+        break; // Only release one ball at a time
+      }
+    }
   }
 
   private createPaddle(): Paddle {
@@ -253,6 +289,11 @@ export class PlayState implements IGameState {
     const ballRadius = 0.4;
     const ballPosition = { x: 0, y: this.bottomBoundary + 2, z: 0 };
     const ball = new Ball(this, ballRadius, ballPosition, this.scene);
+
+    // Ensure the ball starts on the paddle
+    if (this.paddles.length > 0) {
+      ball.attachToPaddle(this.paddles[0].position, this.paddles[0].size);
+    }
 
     // Add to scene
     this.scene.add(ball.mesh);
@@ -364,6 +405,24 @@ export class PlayState implements IGameState {
     document.body.appendChild(uiContainer);
     document.body.appendChild(this.messageElement);
 
+    // Instructions for ball release
+    const instructionsElement = document.createElement('div');
+    instructionsElement.id = 'instructions';
+    instructionsElement.style.position = 'absolute';
+    instructionsElement.style.bottom = '20px';
+    instructionsElement.style.left = '50%';
+    instructionsElement.style.transform = 'translateX(-50%)';
+    instructionsElement.style.color = 'white';
+    instructionsElement.style.fontFamily = 'monospace';
+    instructionsElement.style.fontSize = '16px';
+    instructionsElement.style.textShadow = '1px 1px 2px black';
+    instructionsElement.style.padding = '10px';
+    instructionsElement.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+    instructionsElement.style.borderRadius = '5px';
+    instructionsElement.style.textAlign = 'center';
+    instructionsElement.textContent = 'Click or press SPACE to release ball';
+    document.body.appendChild(instructionsElement);
+
     // Show initial message
     this.showMessage('PONG INVADERS\n\nPress SPACE to Start\n\nUse A/D or Arrow Keys to move');
   }
@@ -408,6 +467,7 @@ export class PlayState implements IGameState {
   private startGame(): void {
     // Hide message
     this.hideMessage();
+    this.alienManager.reset();
 
     // Set game state to playing
     this.state = GameState.PLAYING;
@@ -447,6 +507,11 @@ export class PlayState implements IGameState {
     };
     ball.reset(resetPosition);
 
+    // Attach ball to paddle
+    if (this.paddles.length > 0) {
+      ball.attachToPaddle(this.paddles[0].position, this.paddles[0].size);
+    }
+
     // Show message
     this.showMessage(`BALL LOST\n\nLives: ${this.lives}\n\nContinuing in 2 seconds...`);
 
@@ -480,6 +545,15 @@ export class PlayState implements IGameState {
     // Reset aliens with increased difficulty
     this.alienManager.reset();
     this.alienManager.setDifficulty(this.level);
+
+    // Reset ball position on paddle
+    const ballPosition = { x: 0, y: this.bottomBoundary + 2, z: 0 };
+    for (const ball of this.balls) {
+      ball.reset(ballPosition);
+      if (this.paddles.length > 0) {
+        ball.attachToPaddle(this.paddles[0].position, this.paddles[0].size);
+      }
+    }
   }
 
   private resetGame(): void {
@@ -502,6 +576,9 @@ export class PlayState implements IGameState {
     const ballPosition = { x: 0, y: this.bottomBoundary + 2, z: 0 };
     for (const ball of this.balls) {
       ball.reset(ballPosition);
+      if (this.paddles.length > 0) {
+        ball.attachToPaddle(this.paddles[0].position, this.paddles[0].size);
+      }
     }
 
     this.alienManager.reset();
@@ -753,105 +830,98 @@ export class PlayState implements IGameState {
     });
   }
 
+  // Toggle collision boundary visualization
+  private toggleCollisionBoundaries(): void {
+    // Create a notification about collision boundaries mode
+    const notification = document.createElement('div');
+    notification.style.position = 'absolute';
+    notification.style.top = '170px';
+    notification.style.left = '10px';
+    notification.style.color = '#ff00ff';
+    notification.style.fontFamily = 'monospace';
+    notification.style.fontSize = '16px';
+    notification.style.padding = '5px';
+    notification.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+    notification.style.border = '1px solid #ff00ff';
+    notification.style.transition = 'opacity 0.5s ease-in-out';
+    notification.style.opacity = '1';
+    notification.textContent = this.debugCollisionBoundaries
+      ? 'COLLISION BOUNDARIES: ON'
+      : 'COLLISION BOUNDARIES: OFF';
+
+    document.body.appendChild(notification);
+
+    // Fade out after 2 seconds
+    setTimeout(() => {
+      notification.style.opacity = '0';
+      // Remove from DOM after fade out
+      setTimeout(() => {
+        document.body.removeChild(notification);
+      }, 500);
+    }, 2000);
+
+    // Create or remove collision helpers based on the new state
+    if (this.debugCollisionBoundaries) {
+      this.createCollisionHelpers();
+    } else {
+      this.removeCollisionHelpers();
+    }
+  }
+
+  // Create collision helpers for all game objects
+  private createCollisionHelpers(): void {
+    for (const ball of this.balls) {
+      ball.createCollisionHelper();
+    }
+
+    this.alienManager.createCollisionHelpers();
+
+    for (const paddle of this.paddles) {
+      paddle.createCollisionHelper();
+    }
+  }
+
+  // Remove all collision helpers
+  private removeCollisionHelpers(): void {
+    for (const ball of this.balls) {
+      ball.removeCollisionHelper();
+    }
+
+    this.alienManager.removeCollisionHelpers();
+
+    for (const paddle of this.paddles) {
+      paddle.removeCollisionHelper();
+    }
+  }
+
   render(renderer: THREE.WebGLRenderer): void {
     renderer.render(this.scene, this.camera);
-
-    // Render orientation guide if it exists
-    if (this.scene.userData.orientationGuide) {
-      const { scene: guideScene, camera: guideCamera } = this.scene.userData.orientationGuide;
-
-      // Update orientation guide to match main camera's rotation
-      const guideHelper = guideScene.children[0] as THREE.AxesHelper;
-      if (guideHelper) {
-        guideHelper.quaternion.copy(this.camera.quaternion);
-      }
-
-      // Set up the viewport for the guide in the bottom-right corner
-      const guideSize = Math.min(150, window.innerWidth / 5);
-      renderer.setViewport(
-        window.innerWidth - guideSize - 10,
-        window.innerHeight - guideSize - 10,
-        guideSize,
-        guideSize
-      );
-      renderer.setScissor(
-        window.innerWidth - guideSize - 10,
-        window.innerHeight - guideSize - 10,
-        guideSize,
-        guideSize
-      );
-      renderer.setScissorTest(true);
-
-      // Clear depth buffer to ensure guide renders on top
-      renderer.clearDepth();
-
-      // Render the guide
-      renderer.render(guideScene, guideCamera);
-
-      // Reset viewport and scissor test
-      renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
-      renderer.setScissor(0, 0, window.innerWidth, window.innerHeight);
-      renderer.setScissorTest(false);
-    }
   }
 
   update(deltaTime: number): void {
-    // Update physics simulation first
-    this.updatePhysics(deltaTime);
+    if (this.state !== GameState.PLAYING) {
+      // Update paddle and ball
+      this.alienManager.update(deltaTime);
 
-    // Update paddle and ball
+      // Update camera controls if they exist
+      if (this.cameraControls) {
+        this.cameraControls.update();
+      }
+
+      return;
+    }
+
     this.alienManager.update(deltaTime);
 
-    // Only process gameplay logic when in PLAYING state
-    if (this.state === GameState.PLAYING) {
-      // Check for collisions with aliens
-      for (const ball of this.balls) {
-        const ballPosition = ball.mesh.position;
-        const points = this.alienManager.checkCollisions(ball);
-
-        // Add points if any were scored
-        if (points > 0) {
-          this.addScore(points);
-        }
-
-        // Check if level is complete
-        if (this.alienManager.areAllDestroyed()) {
-          this.levelComplete();
-        }
-
-        // Check if ball is below paddle (lost ball)
-        if (ballPosition.y < this.bottomBoundary - 3) {
-          this.ballLost(ball);
-        }
-      }
-    }
-
     // Update all other game objects
-    this.balls.forEach((ball) => ball.update(deltaTime));
     this.paddles.forEach((paddle) => paddle.update(deltaTime));
 
-    // Update camera controls if they exist
-    if (this.cameraControls) {
-      this.cameraControls.update();
-    }
-  }
-
-  // Physics update function integrated into PlayState
-  private updatePhysics(deltaTime: number): void {
-    // Update positions based on velocities
-    for (const body of [...this.balls, ...this.paddles]) {
-      // Update position based on velocity
-      body.position.x += body.velocity.x * deltaTime;
-      body.position.y += body.velocity.y * deltaTime;
-      body.position.z += body.velocity.z * deltaTime;
-
-      // Update mesh position from physics body
-      if (body.mesh) {
-        body.mesh.position.copy(body.position);
-      }
-    }
-
     for (const ball of this.balls) {
+      ball.update(deltaTime);
+
+      // Skip collision detection for balls attached to the paddle
+      if (ball.isAttachedToPaddle) continue;
+
       // 1. Ball with paddle collision
       for (const paddle of this.paddles) {
         const collision = this.ballVsBox(
@@ -864,10 +934,24 @@ export class PlayState implements IGameState {
         if (collision) {
           // Resolve collision
           this.resolveBallBoxCollision(ball, paddle.position, paddle.size);
-
-          // Trigger collision callbacks if needed
-          ball.onCollision(paddle);
         }
+      }
+
+      const points = this.alienManager.checkCollisions(ball);
+
+      // Add points if any were scored
+      if (points > 0) {
+        this.addScore(points);
+      }
+
+      // Check if level is complete
+      if (this.alienManager.areAllDestroyed()) {
+        this.levelComplete();
+      }
+
+      // Check if ball is below paddle (lost ball)
+      if (ball.position.y < this.bottomBoundary - 3) {
+        this.ballLost(ball);
       }
 
       // Only handle ball bounds collision
@@ -902,18 +986,26 @@ export class PlayState implements IGameState {
       }
     }
 
-    // 2. Ball with aliens is already handled in the alienManager.checkCollisions
-    // which is called in the update method
+    // Update camera controls if they exist
+    if (this.cameraControls) {
+      this.cameraControls.update();
+    }
   }
 
   onEnter(): void {
     // Add keyboard event listener for wireframe toggle
     document.addEventListener('keydown', this.keydownListener);
+
+    // Add click listener for ball release
+    document.addEventListener('click', this.clickListener);
   }
 
   onExit(): void {
     // Remove keyboard event listener for wireframe toggle
     document.removeEventListener('keydown', this.keydownListener);
+
+    // Remove click listener for ball release
+    document.removeEventListener('click', this.clickListener);
 
     // Clean up resources
     this.dispose();
@@ -943,60 +1035,11 @@ export class PlayState implements IGameState {
     if (this.messageElement) {
       this.messageElement.remove();
     }
-  }
 
-  // Creates a small orientation guide that stays in the corner of the screen
-  createOrientationGuide(scene: THREE.Scene): void {
-    // Create a separate scene for the orientation guide
-    const guideScene = new THREE.Scene();
-
-    // Add axes to the guide
-    const axesHelper = new THREE.AxesHelper(10);
-    guideScene.add(axesHelper);
-
-    // Add labels
-    const createGuideLabel = (text: string, position: THREE.Vector3, color: string) => {
-      const canvas = document.createElement('canvas');
-      canvas.width = 64;
-      canvas.height = 32;
-
-      const context = canvas.getContext('2d');
-      if (context) {
-        context.fillStyle = 'rgba(0, 0, 0, 0.5)';
-        context.fillRect(0, 0, canvas.width, canvas.height);
-
-        context.font = 'bold 20px Arial';
-        context.fillStyle = color;
-        context.textAlign = 'center';
-        context.textBaseline = 'middle';
-        context.fillText(text, canvas.width / 2, canvas.height / 2);
-      }
-
-      const texture = new THREE.CanvasTexture(canvas);
-      const material = new THREE.SpriteMaterial({ map: texture });
-      const sprite = new THREE.Sprite(material);
-
-      sprite.position.copy(position);
-      sprite.scale.set(2, 1, 1);
-
-      guideScene.add(sprite);
-      return sprite;
-    };
-
-    // Add axis labels for the guide
-    createGuideLabel('X', new THREE.Vector3(12, 0, 0), '#ff0000');
-    createGuideLabel('Y', new THREE.Vector3(0, 12, 0), '#00ff00');
-    createGuideLabel('Z', new THREE.Vector3(0, 0, 12), '#0000ff');
-
-    // Create camera for the guide
-    const guideCamera = new THREE.PerspectiveCamera(50, 1, 1, 1000);
-    guideCamera.position.set(15, 15, 15);
-    guideCamera.lookAt(0, 0, 0);
-
-    // Add the guide elements to the main scene
-    scene.userData.orientationGuide = {
-      scene: guideScene,
-      camera: guideCamera,
-    };
+    // Remove instructions
+    const instructionsElement = document.getElementById('instructions');
+    if (instructionsElement) {
+      instructionsElement.remove();
+    }
   }
 }

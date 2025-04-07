@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import { GameObject } from './types';
 import { PlayState } from './playState';
 
+// Import the debug flag
+const DEBUG_COLLISION_BOUNDARIES = false; // This will be overridden by the value in playState.ts
+
 export class Ball implements GameObject {
   private game: PlayState;
   public mesh: THREE.Mesh;
@@ -9,14 +12,20 @@ export class Ball implements GameObject {
   public velocity: THREE.Vector3;
   public size: { radius: number };
 
+  // Flag to track if the ball is attached to the paddle
+  public isAttachedToPaddle: boolean = true;
+
+  // Add collision debug helper
+  public collisionHelper: THREE.Mesh | null = null;
+
   private radius: number;
   private initialVelocity: { x: number; y: number; z: number };
   private maxSpeed: number = 20;
   private trailParticles: THREE.Points[] = [];
-  private scene: THREE.Scene | null = null;
+  private scene: THREE.Scene;
   private trailLifetime: number = 0.5; // Trail lifetime in seconds
-  private lastTrailTime: number = 0;
   private trailInterval: number = 0.05; // Time between trail particles
+  private lastTrailTime: number = 0;
 
   constructor(
     game: PlayState,
@@ -58,8 +67,8 @@ export class Ball implements GameObject {
       z: 0, // No Z velocity initially
     };
 
-    // Apply initial velocity
-    this.applyVelocity(this.initialVelocity);
+    // Don't apply initial velocity when creating the ball
+    // This will be applied when the ball is released from the paddle
 
     // Add point light to ball for glow effect
     const light = new THREE.PointLight(0x88aaff, 1, 10);
@@ -77,11 +86,59 @@ export class Ball implements GameObject {
 
     const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
     this.mesh.add(glowMesh);
+
+    // Add debug collision helper if debug mode is enabled
+    if (DEBUG_COLLISION_BOUNDARIES) {
+      this.createCollisionHelper();
+    }
+  }
+
+  // Create a wireframe sphere to visualize the collision boundary
+  public createCollisionHelper(): void {
+    if (!this.scene) return;
+    if (this.collisionHelper) {
+      return;
+    }
+
+    const helperGeometry = new THREE.SphereGeometry(this.radius, 16, 8);
+    const helperMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff0000,
+      wireframe: true,
+    });
+
+    this.collisionHelper = new THREE.Mesh(helperGeometry, helperMaterial);
+    this.scene.add(this.collisionHelper);
+  }
+
+  public removeCollisionHelper(): void {
+    // Remove ball helpers
+    if (this.collisionHelper) {
+      this.scene.remove(this.collisionHelper);
+      if (this.collisionHelper.geometry) this.collisionHelper.geometry.dispose();
+      if (this.collisionHelper.material instanceof THREE.Material) {
+        this.collisionHelper.material.dispose();
+      }
+      this.collisionHelper = null;
+    }
   }
 
   update(deltaTime: number): void {
-    // Update mesh position
+    // If attached to paddle, don't update physics
+    if (this.isAttachedToPaddle) {
+      return;
+    }
+    // Update position based on velocity
+    this.position.x += this.velocity.x * deltaTime;
+    this.position.y += this.velocity.y * deltaTime;
+    this.position.z += this.velocity.z * deltaTime;
+
+    // Update mesh position from physics body
     this.mesh.position.copy(this.position);
+
+    // Update collision helper position
+    if (this.collisionHelper) {
+      this.collisionHelper.position.copy(this.position);
+    }
 
     // Create trail effect
     this.updateTrail(deltaTime);
@@ -93,13 +150,45 @@ export class Ball implements GameObject {
     this.preventHorizontalStalemate();
   }
 
-  // Handle collision with other objects
-  onCollision(other: GameObject): void {
-    // Can handle special collision effects here
-    // The physics system handles the actual collision resolution
+  // Attach the ball to a specific position (usually on top of the paddle)
+  attachToPaddle(
+    paddlePosition: THREE.Vector3,
+    paddleSize: { width: number; height: number; depth: number }
+  ): void {
+    this.isAttachedToPaddle = true;
+
+    // Position the ball on top of the paddle
+    const ballY = paddlePosition.y + paddleSize.height / 2 + this.radius;
+    this.position.set(paddlePosition.x, ballY, paddlePosition.z);
+    this.mesh.position.copy(this.position);
+
+    // Zero out velocity while attached
+    this.velocity.set(0, 0, 0);
+
+    // Clear trail particles
+    this.clearTrail();
+  }
+
+  // Release the ball from the paddle with initial velocity
+  releaseBall(): void {
+    if (!this.isAttachedToPaddle) return;
+
+    this.isAttachedToPaddle = false;
+
+    // Apply initial velocity upward with random x direction
+    const releaseVelocity = {
+      x: (Math.random() * 2 - 1) * 5, // Random X direction
+      y: 8, // Always start moving up
+      z: 0, // No Z velocity initially
+    };
+
+    this.applyVelocity(releaseVelocity);
   }
 
   private updateTrail(deltaTime: number): void {
+    // Don't create trail when attached to paddle
+    if (this.isAttachedToPaddle) return;
+
     const now = performance.now() / 1000;
 
     // Add new trail particle at intervals
@@ -200,14 +289,11 @@ export class Ball implements GameObject {
     this.position.set(position.x, position.y, position.z);
     this.mesh.position.copy(this.position);
 
-    // Reset velocity with random x direction
-    const resetVelocity = {
-      x: (Math.random() * 2 - 1) * 5,
-      y: -8, // Always start moving down
-      z: 0,
-    };
+    // Set as attached to paddle
+    this.isAttachedToPaddle = true;
 
-    this.applyVelocity(resetVelocity);
+    // Reset velocity to zero (will be set when released)
+    this.velocity.set(0, 0, 0);
 
     // Clear trail particles
     this.clearTrail();
